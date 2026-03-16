@@ -61,9 +61,9 @@ conda activate mv_env
 pip install PySide6 requests matplotlib numpy opencv-python pillow
 ```
 
-### 3. 运行主控程序
+### 3. 运行程序
 ```bash
-python platform_launcher.py
+python CH-1.PY
 ```
 
 ---

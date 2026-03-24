@@ -17,7 +17,9 @@ The platform is packaged as a portable `.exe` — **no Python installation requi
 ### 1. Download
 
 - **Baidu Netdisk (China)**:  
-  Link: https://pan.baidu.com/s/1DpoqbZNErwVDULh5ufobxw  Code: `qgh1`
+
+链接: https://pan.baidu.com/s/1wva-sX_QwYadqp1sTa_Sdw 提取码: ufvx 
+
 
 ### 2. Folder Structure After Extraction
 

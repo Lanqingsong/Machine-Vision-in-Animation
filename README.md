@@ -188,7 +188,7 @@ python py/CH-1.py
 
 ## 🤝 贡献与参与
 
-欢迎感兴趣的老师和同学加入本项目：
+时间仓促难免错漏，欢迎感兴趣的老师和同学提出指正：
 
 - **反馈问题**：如遇下载失败或运行报错，请在 [Issues](https://github.com/Lanqingsong/Machine-Vision-in-Animation/issues) 中提出
 

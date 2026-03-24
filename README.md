@@ -15,8 +15,7 @@
 ### 1. 下载地址
 
 - **百度网盘（国内推荐）**：  
-  链接：https://pan.baidu.com/s/1DpoqbZNErwVDULh5ufobxw 提取码：qgh1
-
+  链接：https://pan.baidu.com/s/1DpoqbZNErwVDULh5ufobxw](https://pan.baidu.com/s/1wva-sX_QwYadqp1sTa_Sdw 提取码：ufvx 
 ### 2. 解压后的目录结构
 
 下载压缩包解压后，目录结构如下：

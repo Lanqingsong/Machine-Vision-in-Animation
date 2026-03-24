@@ -16,14 +16,19 @@ def update(val):
     f_stop = s_stop.val  # F-number (Aperture)
     dist = s_dist.val  # Focus distance (mm)
 
-    # --- Simplified DoF Logic ---
-    # COC (Circle of Confusion) constant for calculation
+    # --- Accurate DoF Calculation (Thin Lens Formula) ---
+    # COC (Circle of Confusion): typical 0.03mm for industrial vision
     coc = 0.03
-    # Hyperfocal distance calculation (simplified)
-    # Total DoF is roughly proportional to (F * Dist^2) / f^2
-    dof_half = (f_stop * coc * (dist ** 2)) / (f_len ** 2)
-    near_limit = dist - dof_half
-    far_limit = dist + dof_half
+    # Standard asymmetric DoF formula:
+    #   Near limit = f^2 * s / (f^2 + N * c * (s - f))
+    #   Far  limit = f^2 * s / (f^2 - N * c * (s - f))
+    # DoF is NOT symmetric: far side is always deeper than near side
+    denom_common = f_stop * coc * (dist - f_len)
+    near_limit = (f_len ** 2 * dist) / (f_len ** 2 + denom_common)
+    # Guard: if denominator <= 0, object is inside hyperfocal -> far limit = infinity
+    denom_far = f_len ** 2 - denom_common
+    far_limit = (f_len ** 2 * dist) / denom_far if denom_far > 0 else float('inf')
+    far_limit = min(far_limit, dist + 2000)  # Cap for display purposes
 
     # --- 1. Update Optics Side View ---
     ax_optics.clear()

@@ -21,9 +21,7 @@ b站机器视觉源代码和文稿
 
 ### 1. 下载地址
 *   **百度网盘 (国内推荐)**：
-    *   链接: [https://pan.baidu.com/s/18GxhUyG4hsF7kj3iCij71A](https://pan.baidu.com/s/18GxhUyG4hsF7kj3iCij71A)
-    *   提取码: **vhjs**
-*   **GitHub Release**: [点击前往下载最新版本](https://github.com/Lanqingsong/Machine-Vision-in-Animation/releases)
+  链接: https://pan.baidu.com/s/1DpoqbZNErwVDULh5ufobxw 提取码: qgh1 
 
 ### 2. 使用方法
 1.  下载压缩包并解压到一个固定文件夹。

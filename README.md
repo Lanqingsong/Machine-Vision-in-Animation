@@ -1,3 +1,5 @@
+**[English README](README_EN.md)**
+
 # 🤖 机器视觉动画演示教学平台 (Machine-Vision-in-Animation)
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)

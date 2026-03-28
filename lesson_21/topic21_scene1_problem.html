@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>第21题 Scene1 · 亮度不稳定的问题</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#0B0B1A;color:#DDE2F0;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  height:100vh;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:20px;overflow:hidden;user-select:none;
+}
+h2{font-size:22px;font-weight:600;letter-spacing:.03em}
+.sub{font-size:13px;color:#667799;margin-top:-14px}
+
+/* 波形区 */
+#waveWrap{width:880px}
+.row-label{
+  font-size:12px;color:#667799;margin-bottom:5px;
+  display:flex;align-items:center;gap:8px;
+}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+#waveCanvas{
+  display:block;border-radius:8px;
+  background:#111124;border:1px solid #252548;
+}
+
+/* 下半：图像 + 柱图 */
+#bottom{display:flex;gap:24px;align-items:flex-start;width:880px}
+
+/* 图像 */
+#imgCol{display:flex;flex-direction:column;gap:6px;flex-shrink:0}
+.img-label{font-size:12px;color:#8899BB}
+#camCanvas{border-radius:8px;border:2px solid #252548;display:block}
+#imgCaption{font-size:13px;font-weight:700;text-align:center;min-height:20px;transition:color .2s}
+
+/* 柱图 */
+#grayCol{flex:1}
+.gray-label{font-size:12px;color:#8899BB;margin-bottom:6px}
+#grayRow{
+  display:flex;gap:8px;align-items:flex-end;
+  height:108px;background:#111124;
+  border:1px solid #252548;border-radius:8px;
+  padding:10px 14px;position:relative;
+}
+#threshLine{
+  position:absolute;left:0;right:0;
+  border-top:1.5px dashed #FFD166;pointer-events:none;
+}
+.bw{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1}
+.bar{width:100%;border-radius:3px 3px 0 0;min-height:2px;transition:height .2s ease,background .2s}
+.bval{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;transition:color .2s}
+.blbl{font-size:10px;color:#445566}
+.miss{
+  font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;
+  background:#FF5544;color:#fff;animation:blink .55s step-end infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
+
+#status{font-size:14px;font-weight:700;min-height:22px;text-align:center;transition:color .2s}
+</style>
+</head>
+<body>
+
+<h2>光源亮度不稳定 → 图像灰度抖动</h2>
+<p class="sub">持续光源含工频纹波（100 Hz），相机自由运行时每帧曝光相位随机</p>
+
+<div id="waveWrap">
+  <div class="row-label">
+    <span class="dot" style="background:#FFD166"></span>光源亮度（实时滚动）
+    <span style="color:#FFD16699;margin-left:10px">— — 检测阈值 0.70</span>
+  </div>
+  <canvas id="waveCanvas" width="880" height="110"></canvas>
+</div>
+
+<div id="bottom">
+  <div id="imgCol">
+    <div class="img-label">模拟相机图像</div>
+    <canvas id="camCanvas" width="210" height="136"></canvas>
+    <div id="imgCaption">—</div>
+  </div>
+  <div id="grayCol">
+    <div class="gray-label">每帧目标区域灰度值（黄虚线 = 阈值 0.70，低于阈值 = 漏检）</div>
+    <div id="grayRow"><div id="threshLine"></div></div>
+  </div>
+</div>
+
+<div id="status"></div>
+
+<script>
+// ── 物理参数 ──────────────────────────────────────────────────
+const RIPPLE_HZ = 100;   // 工频整流后 100Hz
+const DC        = 0.50;  // 直流分量
+const AMP       = 0.50;  // 纹波幅度（较大，演示效果明显）
+const TE_MS     = 0.5;   // 曝光时间 ms（短曝光，抖动最明显）
+const THRESHOLD = 0.70;  // 检测阈值
+const N_BARS    = 9;
+const BAR_MAX   = 72;    // 柱最大高度 px
+const ROW_INNER = 88;    // 柱图区可用高度 px
+const SHOW_MS   = 100;   // 波形显示窗口宽度 ms
+
+// 帧间隔：不规则序列，确保每帧触发相位不重复
+// 均不是工频周期10ms的整数倍
+const FRAME_IVLS = [733,787,811,693,757,823,713,769,801,741];
+let fIdx = 0;
+
+function lightAt(t_ms){
+  return DC + AMP * Math.abs(Math.sin(2*Math.PI*RIPPLE_HZ*t_ms/1000));
+}
+function integrate(t0, dur){
+  // 关键：t0 加随机相位偏移，模拟相机触发时刻相对工频的随机性
+  const offset = Math.random() * (1000/RIPPLE_HZ);  // 0~10ms 随机
+  const t = t0 + offset;
+  const N=80; let s=0;
+  for(let k=0;k<N;k++) s+=lightAt(t+(k+.5)*dur/N);
+  return Math.min(1,Math.max(0,s/N));
+}
+
+// ── 波形画布 ──────────────────────────────────────────────────
+const wc=document.getElementById('waveCanvas');
+const wctx=wc.getContext('2d');
+const WW=wc.width, WH=wc.height;
+let elapsed=0;
+const markers=[];  // {t, b}
+
+function drawWave(){
+  wctx.clearRect(0,0,WW,WH);
+  // 网格
+  wctx.strokeStyle='#1A1A2E';wctx.lineWidth=1;
+  for(let x=0;x<WW;x+=80){wctx.beginPath();wctx.moveTo(x,0);wctx.lineTo(x,WH);wctx.stroke();}
+  // 阈值线
+  const ty=WH-8-THRESHOLD*(WH-16);
+  wctx.setLineDash([6,4]);wctx.strokeStyle='#FFD16688';wctx.lineWidth=1.2;
+  wctx.beginPath();wctx.moveTo(0,ty);wctx.lineTo(WW,ty);wctx.stroke();
+  wctx.setLineDash([]);
+  // 波形
+  wctx.beginPath();let first=true;
+  for(let px=0;px<=WW;px++){
+    const t=elapsed-SHOW_MS+(px/WW)*SHOW_MS;
+    const y=WH-8-lightAt(t)*(WH-16);
+    first?wctx.moveTo(px,y):wctx.lineTo(px,y);first=false;
+  }
+  wctx.strokeStyle='#FFD166';wctx.lineWidth=2.2;wctx.stroke();
+  wctx.lineTo(WW,WH);wctx.lineTo(0,WH);wctx.closePath();
+  wctx.fillStyle='rgba(255,209,102,0.10)';wctx.fill();
+  // 曝光标记
+  markers.forEach(m=>{
+    const age=elapsed-m.t; if(age>SHOW_MS)return;
+    const x=((m.t-(elapsed-SHOW_MS))/SHOW_MS)*WW;
+    const alpha=Math.max(0.05,1-age/SHOW_MS);
+    const col=m.b<THRESHOLD?'#FF5544':'#3DD68C';
+    wctx.save();wctx.globalAlpha=alpha;
+    wctx.strokeStyle=col;wctx.lineWidth=1.8;wctx.setLineDash([4,3]);
+    wctx.beginPath();wctx.moveTo(x,0);wctx.lineTo(x,WH);wctx.stroke();
+    wctx.setLineDash([]);
+    wctx.fillStyle=col;wctx.font='bold 11px monospace';wctx.textAlign='center';
+    wctx.fillText(m.b.toFixed(2),x,13);
+    wctx.restore();
+  });
+}
+
+// ── 相机图像 ──────────────────────────────────────────────────
+const cc=document.getElementById('camCanvas');
+const cctx=cc.getContext('2d');
+const CW=cc.width,CH=cc.height;
+const bgImg=new Image();
+let bgLoaded=false;
+bgImg.onload=()=>{bgLoaded=true;};
+bgImg.onerror=()=>{bgLoaded=false;};
+bgImg.src='1.jpg';
+
+function drawFallback(b){
+  cctx.fillStyle='#1A2A2A';cctx.fillRect(0,0,CW,CH);
+  const v=Math.round(b*200);
+  cctx.fillStyle=`rgb(${v},${v},${v})`;cctx.fillRect(18,22,CW-36,CH-44);
+  const v2=Math.round(b*240);
+  cctx.fillStyle=`rgb(${v2},${v2},${v2})`;cctx.fillRect(52,40,106,46);
+  const vd=Math.round(Math.max(0,b-0.2)*90);
+  cctx.fillStyle=`rgb(${vd},${vd},${vd})`;
+  cctx.beginPath();cctx.arc(38,CH/2,13,0,Math.PI*2);cctx.fill();
+  cctx.beginPath();cctx.arc(CW-38,CH/2,13,0,Math.PI*2);cctx.fill();
+  cctx.strokeStyle='#334455';cctx.lineWidth=1;cctx.strokeRect(18,22,CW-36,CH-44);
+}
+function drawCam(b){
+  if(bgLoaded){
+    cctx.clearRect(0,0,CW,CH);
+    cctx.drawImage(bgImg,0,0,CW,CH);
+    cctx.fillStyle=`rgba(0,0,0,${(1-b)*0.75})`;
+    cctx.fillRect(0,0,CW,CH);
+  } else { drawFallback(b); }
+  const col=b<THRESHOLD?'#FF5544':'#3DD68C';
+  cctx.strokeStyle=col;cctx.lineWidth=2;cctx.setLineDash([4,3]);
+  cctx.strokeRect(CW*.22,CH*.22,CW*.56,CH*.56);
+  cctx.setLineDash([]);
+}
+
+// ── 灰度柱图 ──────────────────────────────────────────────────
+const gr=document.getElementById('grayRow');
+document.getElementById('threshLine').style.bottom=(THRESHOLD*ROW_INNER+10)+'px';
+const barEls=[],valEls=[],missEls=[];
+for(let i=0;i<N_BARS;i++){
+  const w=document.createElement('div');w.className='bw';
+  const miss=document.createElement('span');miss.className='miss';miss.textContent='漏检';miss.style.visibility='hidden';
+  const bar=document.createElement('div');bar.className='bar';bar.style.height='2px';bar.style.background='#445566';
+  const val=document.createElement('div');val.className='bval';val.textContent='—';
+  const lbl=document.createElement('div');lbl.className='blbl';lbl.textContent=`f${i+1}`;
+  w.append(miss,bar,val,lbl);gr.appendChild(w);
+  barEls.push(bar);valEls.push(val);missEls.push(miss);
+}
+const hist=[];
+function pushResult(b){
+  hist.push(b);if(hist.length>N_BARS)hist.shift();
+  for(let i=0;i<N_BARS;i++){
+    const idx=hist.length-N_BARS+i;
+    if(idx<0){barEls[i].style.height='2px';valEls[i].textContent='—';missEls[i].style.visibility='hidden';continue;}
+    const bv=hist[idx];const miss=bv<THRESHOLD;const col=miss?'#FF5544':'#3DD68C';
+    barEls[i].style.height=Math.max(2,Math.round(bv*BAR_MAX))+'px';
+    barEls[i].style.background=col;
+    valEls[i].textContent=bv.toFixed(2);valEls[i].style.color=col;
+    missEls[i].style.visibility=miss?'visible':'hidden';
+  }
+}
+
+// ── 主循环 ────────────────────────────────────────────────────
+let startTs=null,nextAt=0;
+function animate(ts){
+  if(!startTs)startTs=ts;
+  elapsed=ts-startTs;
+  drawWave();
+  if(elapsed>=nextAt){
+    const b=integrate(elapsed,TE_MS);
+    markers.push({t:elapsed+TE_MS/2,b});
+    if(markers.length>18)markers.shift();
+    pushResult(b);
+    drawCam(b);
+    const st=document.getElementById('status');
+    const cp=document.getElementById('imgCaption');
+    if(b<THRESHOLD){
+      st.textContent=`⚠ 灰度 ${b.toFixed(2)} < 阈值 ${THRESHOLD} → 漏检！`;
+      st.style.color='#FF5544';cp.textContent=`灰度 ${b.toFixed(2)}  漏检`;cp.style.color='#FF5544';
+    } else {
+      st.textContent=`灰度 ${b.toFixed(2)}  正常检测`;
+      st.style.color='#3DD68C';cp.textContent=`灰度 ${b.toFixed(2)}  正常`;cp.style.color='#3DD68C';
+    }
+    nextAt=elapsed+FRAME_IVLS[fIdx%FRAME_IVLS.length];fIdx++;
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

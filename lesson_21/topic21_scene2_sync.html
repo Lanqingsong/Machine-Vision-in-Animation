@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>第21题 Scene2 · 频闪同步原理与参数</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#0B0B1A;color:#DDE2F0;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  min-height:100vh;display:flex;flex-direction:column;
+  align-items:center;padding:22px 20px 16px;gap:18px;
+}
+h2{font-size:21px;font-weight:600}
+.sub{font-size:13px;color:#667799;margin-top:-12px}
+
+/* 时间轴并排 */
+#tls{display:flex;gap:18px;width:100%;max-width:1000px}
+.panel{
+  flex:1;background:#111124;
+  border:1px solid #252548;border-radius:10px;
+  padding:14px 16px 10px;
+}
+.ptitle{
+  font-size:13px;font-weight:700;margin-bottom:10px;
+  display:flex;align-items:center;gap:6px;
+}
+.bad{color:#FF5544}.good{color:#3DD68C}
+
+.trow{display:flex;align-items:center;height:38px;margin-bottom:5px}
+.tlbl{width:48px;font-size:11px;color:#667799;flex-shrink:0;text-align:right;padding-right:8px;line-height:1.3}
+.cwrap{flex:1;height:38px;position:relative}
+canvas.cv{width:100%;height:38px;display:block;border-radius:4px;background:#0D0D1E}
+
+.chips{display:flex;gap:6px;margin-top:8px;min-height:28px;align-items:center;flex-wrap:wrap}
+.chip{
+  padding:3px 9px;border-radius:4px;font-size:12px;font-weight:700;
+  font-variant-numeric:tabular-nums;border:1px solid;transition:background .2s,color .2s;
+}
+
+/* 参数滑块 */
+#sliders{
+  width:100%;max-width:1000px;background:#111124;
+  border:1px solid #252548;border-radius:10px;
+  padding:16px 22px;display:flex;flex-direction:column;gap:13px;
+}
+.srow{display:flex;align-items:center;gap:12px}
+.sname{font-size:13px;font-weight:700;width:168px;flex-shrink:0}
+input[type=range]{
+  flex:1;-webkit-appearance:none;height:5px;border-radius:3px;outline:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;cursor:pointer;border:2px solid #0B0B1A;
+}
+#r_td{background:linear-gradient(to right,#9B72FF,#2A1A44)}
+#r_td::-webkit-slider-thumb{background:#9B72FF}
+#r_tw{background:linear-gradient(to right,#FFD166,#443300)}
+#r_tw::-webkit-slider-thumb{background:#FFD166}
+#r_te{background:linear-gradient(to right,#3DD68C,#0D2A1A)}
+#r_te::-webkit-slider-thumb{background:#3DD68C}
+.sval{width:44px;text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+.constraint{font-size:12px;font-weight:600;padding:2px 10px;border-radius:4px;color:#3DD68C;min-height:20px}
+.constraint.warn{color:#FF5544;background:rgba(255,85,68,.12)}
+
+/* 按钮 */
+#btns{display:flex;gap:12px}
+button{
+  padding:8px 22px;border-radius:6px;border:1px solid;cursor:pointer;
+  font-size:13px;font-weight:600;font-family:inherit;transition:background .15s;
+}
+#bpause{border-color:#4D9FFF;color:#4D9FFF;background:rgba(77,159,255,.08)}
+#bpause:hover{background:rgba(77,159,255,.2)}
+#breset{border-color:#445566;color:#667799;background:transparent}
+#breset:hover{background:rgba(68,85,102,.2)}
+</style>
+</head>
+<body>
+
+<h2>频闪同步原理</h2>
+<p class="sub">左：不同步（自由运行）&emsp;右：硬触发同步 — 对比曝光窗口与光源脉冲的关系</p>
+
+<div id="tls">
+  <!-- 不同步 -->
+  <div class="panel">
+    <div class="ptitle bad">❌ &nbsp;不同步（自由运行）</div>
+    <div class="trow"><div class="tlbl">光源<br>亮度</div><div class="cwrap"><canvas class="cv" id="cFL"></canvas></div></div>
+    <div class="trow"><div class="tlbl">触发<br>信号</div><div class="cwrap"><canvas class="cv" id="cFT"></canvas></div></div>
+    <div class="trow"><div class="tlbl">曝光<br>窗口</div><div class="cwrap"><canvas class="cv" id="cFE"></canvas></div></div>
+    <div class="chips" id="fchips"></div>
+  </div>
+  <!-- 同步 -->
+  <div class="panel">
+    <div class="ptitle good">✅ &nbsp;硬触发同步</div>
+    <div class="trow"><div class="tlbl">光源<br>脉冲</div><div class="cwrap"><canvas class="cv" id="cSL"></canvas></div></div>
+    <div class="trow"><div class="tlbl">触发<br>信号</div><div class="cwrap"><canvas class="cv" id="cST"></canvas></div></div>
+    <div class="trow"><div class="tlbl">曝光<br>窗口</div><div class="cwrap"><canvas class="cv" id="cSE"></canvas></div></div>
+    <div class="chips" id="schips"></div>
+  </div>
+</div>
+
+<!-- 滑块 -->
+<div id="sliders">
+  <div class="srow">
+    <span class="sname" style="color:#9B72FF">td &nbsp;触发延迟 (ms)</span>
+    <input type="range" id="r_td" min="0" max="5" step="0.1" value="1.0">
+    <span class="sval" style="color:#9B72FF" id="v_td">1.0</span>
+  </div>
+  <div class="srow">
+    <span class="sname" style="color:#FFD166">tw &nbsp;脉冲宽度 (ms)</span>
+    <input type="range" id="r_tw" min="0.5" max="8" step="0.1" value="4.0">
+    <span class="sval" style="color:#FFD166" id="v_tw">4.0</span>
+  </div>
+  <div class="srow">
+    <span class="sname" style="color:#3DD68C">te &nbsp;曝光时间 (ms)</span>
+    <input type="range" id="r_te" min="0.5" max="8" step="0.1" value="2.0">
+    <span class="sval" style="color:#3DD68C" id="v_te">2.0</span>
+    <span class="constraint" id="cst">te ≤ tw ✓</span>
+  </div>
+</div>
+
+<div id="btns">
+  <button id="bpause">⏸ 暂停</button>
+  <button id="breset">↺ 重置</button>
+</div>
+
+<script>
+// ── 参数 ──────────────────────────────────────────────────────
+let td=1.0, tw=4.0, te=2.0;
+const DC=0.50, AMP=0.50, RIPPLE_HZ=100;
+
+// FRAME_PERIOD=13ms：与工频周期10ms互质，确保每帧相位不同
+const FRAME_PERIOD=13;
+const SHOW_MS=65;   // 显示窗口约覆盖5帧
+const THRESH=0.70;
+const MAX_CHIPS=6;
+
+let elapsed=0, startTs=null, paused=false;
+const fRes=[], sRes=[];
+let lastProc=-9999;
+
+function lightAt(t){ return DC+AMP*Math.abs(Math.sin(2*Math.PI*RIPPLE_HZ*t/1000)); }
+function integrate(t0, dur){
+  const N=60; let s=0;
+  for(let k=0;k<N;k++) s+=lightAt(t0+(k+.5)*dur/N);
+  return Math.min(1,Math.max(0,s/N));
+}
+
+// ── Canvas 初始化（等 load 后设宽）────────────────────────────
+const IDS=['cFL','cFT','cFE','cSL','cST','cSE'];
+const cvs={};
+IDS.forEach(id=>{ cvs[id]=document.getElementById(id); });
+
+function initSizes(){
+  IDS.forEach(id=>{
+    const rect=cvs[id].parentElement.getBoundingClientRect();
+    cvs[id].width=Math.floor(rect.width)||340;
+    cvs[id].height=38;
+  });
+}
+
+function px(t_ms, W){ return ((t_ms-(elapsed-SHOW_MS))/SHOW_MS)*W; }
+function clr(cv){ const ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); return ctx; }
+
+// ── 绘制函数 ──────────────────────────────────────────────────
+function drawFreeLight(){
+  const cv=cvs.cFL; const W=cv.width,H=cv.height;
+  const ctx=clr(cv);
+  ctx.beginPath(); let first=true;
+  for(let i=0;i<=W;i++){
+    const t=elapsed-SHOW_MS+(i/W)*SHOW_MS;
+    const y=H-4-lightAt(t)*(H-8);
+    first?ctx.moveTo(i,y):ctx.lineTo(i,y); first=false;
+  }
+  ctx.strokeStyle='#FFD166';ctx.lineWidth=2;ctx.stroke();
+  ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();
+  ctx.fillStyle='rgba(255,209,102,0.15)';ctx.fill();
+}
+
+function drawSyncLight(){
+  const cv=cvs.cSL; const W=cv.width,H=cv.height;
+  const ctx=clr(cv);
+  const t0=elapsed-SHOW_MS;
+  const first=Math.floor(t0/FRAME_PERIOD)*FRAME_PERIOD-FRAME_PERIOD;
+  for(let trig=first;trig<=elapsed+FRAME_PERIOD;trig+=FRAME_PERIOD){
+    const ps=trig+td, pe=ps+tw;
+    const x0=px(ps,W), x1=px(pe,W);
+    if(x1<0||x0>W) continue;
+    const cx0=Math.max(0,x0), cx1=Math.min(W,x1);
+    ctx.fillStyle='rgba(255,209,102,0.85)';ctx.fillRect(cx0,4,cx1-cx0,H-8);
+    ctx.strokeStyle='#FFD166';ctx.lineWidth=1.5;ctx.strokeRect(cx0,4,cx1-cx0,H-8);
+  }
+  // tw标注（第2帧）
+  const trig1=Math.floor((elapsed-SHOW_MS)/FRAME_PERIOD)*FRAME_PERIOD+FRAME_PERIOD;
+  if(trig1+td>=elapsed-SHOW_MS&&trig1+td+tw<=elapsed+5){
+    const ps=trig1+td,pe=ps+tw;
+    const x0=px(ps,W),x1=px(pe,W);
+    if(x0>2&&x1<W-2&&x1-x0>20){
+      ctx.strokeStyle='#FFD16688';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(x0,2);ctx.lineTo(x1,2);ctx.stroke();
+      ctx.fillStyle='#FFD166';ctx.font='bold 10px sans-serif';ctx.textAlign='center';
+      ctx.fillText(`tw=${tw.toFixed(1)}ms`,(x0+x1)/2,H-2);
+    }
+  }
+}
+
+function drawTrig(cvKey, col){
+  const cv=cvs[cvKey]; const W=cv.width,H=cv.height;
+  const ctx=clr(cv);
+  const t0=elapsed-SHOW_MS;
+  const first=Math.ceil(t0/FRAME_PERIOD)*FRAME_PERIOD;
+  for(let t=first;t<=elapsed+1;t+=FRAME_PERIOD){
+    const x=px(t,W); if(x<0||x>W) continue;
+    ctx.strokeStyle=col;ctx.lineWidth=1.8;
+    ctx.beginPath();ctx.moveTo(x,H*0.65);ctx.lineTo(x,2);ctx.stroke();
+    ctx.fillStyle=col;
+    ctx.beginPath();ctx.moveTo(x,2);ctx.lineTo(x-4,10);ctx.lineTo(x+4,10);ctx.closePath();ctx.fill();
+  }
+}
+
+function drawExpWindows(cvKey, mode){
+  const cv=cvs[cvKey]; const W=cv.width,H=cv.height;
+  const ctx=clr(cv);
+  const t0=elapsed-SHOW_MS;
+  const first=Math.floor(t0/FRAME_PERIOD)*FRAME_PERIOD-FRAME_PERIOD;
+
+  for(let trig=first;trig<=elapsed+FRAME_PERIOD;trig+=FRAME_PERIOD){
+    const es=(mode==='free')?trig:trig+td;
+    const ee=es+te;
+    const x0=px(es,W), x1=px(ee,W);
+    if(x1<0||x0>W) continue;
+    const cx0=Math.max(0,x0), cx1=Math.min(W,x1);
+
+    const good=(mode==='sync')&&(te<=tw);
+    const active=es<=elapsed&&elapsed<ee;
+    let col;
+    if(mode==='free') col='#556688';
+    else if(!good)    col='#FF5544';
+    else              col='#3DD68C';
+
+    ctx.globalAlpha=active?1.0:0.55;
+    ctx.fillStyle=col+'44';ctx.fillRect(cx0,3,cx1-cx0,H-6);
+    ctx.strokeStyle=col;ctx.lineWidth=active?2:1.2;ctx.strokeRect(cx0,3,cx1-cx0,H-6);
+    ctx.globalAlpha=1;
+
+    // 已完成窗口显示亮度
+    if(ee<elapsed){
+      let b;
+      if(mode==='free'){
+        // 随机相位积分，模拟自由运行
+        const phaseRand=((trig*7+fRes.length*3)%100)/10; // 确定性伪随机
+        b=integrate(trig+phaseRand, te);
+      } else {
+        const pulse_end=trig+td+tw;
+        const overlap=Math.max(0,Math.min(ee,pulse_end)-es);
+        b=te>0?Math.min(1,0.95*overlap/te):0;
+      }
+      const xc=(cx0+cx1)/2;
+      ctx.font='bold 10px monospace';ctx.fillStyle=col;ctx.textAlign='center';
+      ctx.fillText(b.toFixed(2),xc,H/2+4);
+    }
+  }
+  // te标注（同步模式，第3帧）
+  if(mode==='sync'){
+    const trig2=Math.floor((elapsed-SHOW_MS)/FRAME_PERIOD)*FRAME_PERIOD+FRAME_PERIOD*2;
+    const es2=trig2+td, ee2=es2+te;
+    if(ee2<elapsed){
+      const x0=px(es2,W),x1=px(ee2,W);
+      if(x0>2&&x1<W-2&&x1-x0>14){
+        const col=te<=tw?'#3DD68C':'#FF5544';
+        ctx.strokeStyle=col;ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(x0,H-2);ctx.lineTo(x1,H-2);ctx.stroke();
+        ctx.fillStyle=col;ctx.font='bold 10px sans-serif';ctx.textAlign='center';
+        ctx.fillText(`te=${te.toFixed(1)}ms`,(x0+x1)/2,2);
+      }
+    }
+  }
+}
+
+// ── 结果芯片更新 ─────────────────────────────────────────────
+function addChip(el, b){
+  const chip=document.createElement('div');
+  chip.className='chip';
+  const col=b<THRESH?'#FF5544':'#3DD68C';
+  chip.style.color=col;chip.style.borderColor=col;chip.style.background=col+'22';
+  chip.textContent=b.toFixed(2);
+  el.appendChild(chip);
+  while(el.children.length>MAX_CHIPS) el.removeChild(el.firstChild);
+}
+
+// ── 处理每帧结果 ─────────────────────────────────────────────
+function processFrames(){
+  const lastTrig=Math.floor((elapsed-te)/FRAME_PERIOD)*FRAME_PERIOD;
+  if(lastTrig<=lastProc||lastTrig<0) return;
+  lastProc=lastTrig;
+
+  // 不同步：随机相位（用时间戳的小数部分模拟随机性）
+  const randPhase=(elapsed*0.137)%10;
+  const b_free=integrate(lastTrig+randPhase, te);
+  addChip(document.getElementById('fchips'), b_free);
+
+  // 同步
+  const exp_start=lastTrig+td;
+  const pulse_end=lastTrig+td+tw;
+  const overlap=Math.max(0,Math.min(exp_start+te,pulse_end)-exp_start);
+  const b_sync=te>0?Math.min(1,0.95*overlap/te):0;
+  addChip(document.getElementById('schips'), b_sync);
+}
+
+// ── 主循环 ────────────────────────────────────────────────────
+function frame(ts){
+  if(!startTs) startTs=ts;
+  if(!paused) elapsed=(ts-startTs);
+
+  drawFreeLight();
+  drawTrig('cFT','#4D9FFF');
+  drawExpWindows('cFE','free');
+  drawSyncLight();
+  drawTrig('cST','#4D9FFF');
+  drawExpWindows('cSE','sync');
+  processFrames();
+  requestAnimationFrame(frame);
+}
+
+// ── 约束检查 ─────────────────────────────────────────────────
+function checkCst(){
+  const el=document.getElementById('cst');
+  if(te>tw){ el.textContent=`te > tw ⚠ 曝光超出脉冲`; el.className='constraint warn'; }
+  else      { el.textContent=`te ≤ tw ✓`;              el.className='constraint'; }
+}
+
+// ── 控件 ─────────────────────────────────────────────────────
+document.getElementById('r_td').addEventListener('input',e=>{
+  td=parseFloat(e.target.value); document.getElementById('v_td').textContent=td.toFixed(1); checkCst();
+});
+document.getElementById('r_tw').addEventListener('input',e=>{
+  tw=parseFloat(e.target.value); document.getElementById('v_tw').textContent=tw.toFixed(1); checkCst();
+});
+document.getElementById('r_te').addEventListener('input',e=>{
+  te=parseFloat(e.target.value); document.getElementById('v_te').textContent=te.toFixed(1); checkCst();
+});
+document.getElementById('bpause').addEventListener('click',()=>{
+  paused=!paused;
+  if(!paused) startTs=performance.now()-elapsed;
+  document.getElementById('bpause').textContent=paused?'▶ 继续':'⏸ 暂停';
+});
+document.getElementById('breset').addEventListener('click',()=>{
+  startTs=performance.now(); elapsed=0; lastProc=-9999;
+  document.getElementById('fchips').innerHTML='';
+  document.getElementById('schips').innerHTML='';
+});
+
+window.addEventListener('load',()=>{ initSizes(); checkCst(); requestAnimationFrame(frame); });
+</script>
+</body>
+</html>

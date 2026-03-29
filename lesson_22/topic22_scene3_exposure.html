@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>第22题 · 画面3：曝光-亮度-增益</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0B0B1A; color:#DDE2F0;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px;
+  overflow:hidden; user-select:none;
+}
+h2 { font-size:19px; font-weight:700; }
+.sub { font-size:12px; color:#667799; margin-top:-10px; }
+
+#main { display:flex; gap:18px; width:980px; align-items:flex-start; }
+
+/* 左：图像区 */
+#imgCol { display:flex; flex-direction:column; gap:8px; width:310px; flex-shrink:0; }
+.panel-label { font-size:12px; color:#8899BB; margin-bottom:4px; }
+canvas { border-radius:8px; display:block; }
+
+/* 增益对比区 */
+#cmpWrap {
+  background:#111124; border:1px solid #252548;
+  border-radius:8px; padding:8px;
+}
+.cmp-row { display:flex; gap:6px; }
+.cmp-item { flex:1; text-align:center; }
+.cmp-lbl { font-size:10px; color:#667799; margin-bottom:3px; }
+
+/* 右侧 */
+#rightCol { flex:1; display:flex; flex-direction:column; gap:10px; }
+#metricsPanel {
+  background:#111124; border:1px solid #252548; border-radius:10px;
+  padding:12px; display:grid; grid-template-columns:1fr 1fr; gap:8px;
+}
+.metric { display:flex; flex-direction:column; gap:2px; }
+.metric-label { font-size:11px; color:#667799; }
+.metric-val { font-size:19px; font-weight:800; font-variant-numeric:tabular-nums; }
+
+#warningsPanel {
+  background:#111124; border:1px solid #252548;
+  border-radius:10px; padding:10px 12px;
+  display:flex; flex-direction:column; gap:5px;
+}
+.warn-item { font-size:12px; padding:4px 8px; border-radius:4px; border-left:3px solid; }
+#advice {
+  background:#111124; border-radius:8px; padding:10px 12px;
+  font-size:12.5px; font-weight:600; border:1px solid #252548; line-height:1.6;
+}
+
+/* 控件 */
+#controls { width:980px; display:flex; flex-direction:column; gap:8px; }
+.sl-row { display:flex; align-items:center; gap:10px; }
+.sl-name { font-size:12px; color:#8899BB; width:160px; flex-shrink:0; }
+input[type=range] {
+  flex:1; -webkit-appearance:none; height:4px;
+  border-radius:2px; outline:none; cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:14px; height:14px;
+  border-radius:50%; border:2px solid #0B0B1A; cursor:pointer;
+}
+#sl_te   { background:linear-gradient(to right,#3DD68C,#1A1A30); }
+#sl_te::-webkit-slider-thumb   { background:#3DD68C; }
+#sl_lux  { background:linear-gradient(to right,#FFD166,#1A1A30); }
+#sl_lux::-webkit-slider-thumb  { background:#FFD166; }
+#sl_gain { background:linear-gradient(to right,#FF5544,#1A1A30); }
+#sl_gain::-webkit-slider-thumb { background:#FF5544; }
+.sl-val { width:58px; text-align:right; font-size:12px; font-weight:700; }
+</style>
+</head>
+<body>
+
+<h2>曝光时间 · 光源亮度 · 相机增益：联合调试原则</h2>
+<p class="sub">目标灰度 120~200 · 优先提光源亮度 → 再调曝光时间 → 最后才动增益</p>
+
+<div id="main">
+  <div id="imgCol">
+    <div>
+      <div class="panel-label">模拟相机图像（含运动模糊与噪声）</div>
+      <canvas id="cvMain" width="310" height="190" style="border:1px solid #252548;"></canvas>
+    </div>
+    <div id="cmpWrap">
+      <div class="panel-label">增益对比（放大区局部）</div>
+      <div class="cmp-row">
+        <div class="cmp-item">
+          <div class="cmp-lbl">Gain = 0 dB（参考）</div>
+          <canvas id="cvCmp0" width="142" height="72" style="border:1px solid #1A1A30;border-radius:4px;"></canvas>
+        </div>
+        <div class="cmp-item">
+          <div class="cmp-lbl" id="cmpLabel">当前 Gain</div>
+          <canvas id="cvCmpN" width="142" height="72" style="border:1px solid #1A1A30;border-radius:4px;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="rightCol">
+    <div id="metricsPanel">
+      <div class="metric">
+        <span class="metric-label">图像平均灰度</span>
+        <span class="metric-val" id="mGray" style="color:#DDE2F0">—</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">噪声 σ（标准差）</span>
+        <span class="metric-val" id="mNoise" style="color:#FF5544">—</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">信噪比 SNR</span>
+        <span class="metric-val" id="mSNR" style="color:#3DD68C">—</span>
+      </div>
+      <div class="metric">
+        <span class="metric-label">运动模糊</span>
+        <span class="metric-val" id="mBlur" style="color:#FFD166">—</span>
+      </div>
+    </div>
+
+    <div id="warningsPanel">
+      <div class="panel-label" style="margin-bottom:0">状态</div>
+      <div class="warn-item" id="w1">—</div>
+      <div class="warn-item" id="w2">—</div>
+      <div class="warn-item" id="w3">—</div>
+    </div>
+
+    <div id="advice">—</div>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="sl-row">
+    <span class="sl-name" style="color:#3DD68C">曝光时间 te (μs)</span>
+    <input type="range" id="sl_te"   min="50" max="3000" step="50" value="500">
+    <span class="sl-val" style="color:#3DD68C" id="val_te">500 μs</span>
+  </div>
+  <div class="sl-row">
+    <span class="sl-name" style="color:#FFD166">光源亮度（%额定）</span>
+    <input type="range" id="sl_lux"  min="10" max="100" step="5" value="50">
+    <span class="sl-val" style="color:#FFD166" id="val_lux">50%</span>
+  </div>
+  <div class="sl-row">
+    <span class="sl-name" style="color:#FF5544">相机增益 Gain (dB)</span>
+    <input type="range" id="sl_gain" min="0" max="24" step="1" value="0">
+    <span class="sl-val" style="color:#FF5544" id="val_gain">0 dB</span>
+  </div>
+</div>
+
+<script>
+let te = 500, lux = 50, gain = 0;
+
+const OBJ_SPEED = 400;   // mm/s，产线工件速度（固定）
+const PX_PER_MM = 4;     // px/mm
+
+// ── 物理模型（重新校准）────────────────────────────────────────
+// 校准目标：te=500μs, lux=50%, gain=0 → 灰度约50（偏暗，需要调整演示出来）
+//           te=1500μs, lux=80%, gain=0 → 灰度约160（目标区间）
+// k = 160 / (1500 * 0.8) = 0.1333
+const K = 0.1333;
+
+function computeScene(te, lux, gain) {
+  // 基础光通量（未放大）
+  const baseSignal = te * (lux / 100) * K;       // ADU，线性
+
+  // 增益倍数
+  const gainMult = Math.pow(10, gain / 20);
+
+  // 最终灰度（截断到255）
+  const meanGray = Math.min(255, Math.round(baseSignal * gainMult));
+
+  // 噪声模型（关键：增益放大读出噪声，视觉上噪声颗粒变大）
+  // 读出噪声：固定，约3 ADU（gain=0时）
+  const readNoise  = 3.0;
+  // 散粒噪声：与信号量的平方根成正比（泊松分布）
+  const shotNoise  = Math.sqrt(Math.max(1, baseSignal * gainMult * 0.8));
+  // 增益放大读出噪声：gain越大越严重
+  const gainNoise  = readNoise * gainMult;
+  // 总噪声
+  const totalNoise = Math.sqrt(shotNoise ** 2 + gainNoise ** 2);
+
+  // SNR
+  const snr = meanGray > 0 ? meanGray / Math.max(0.5, totalNoise) : 0;
+
+  // 运动模糊（像素）
+  const blurPx = (te / 1e6) * OBJ_SPEED * PX_PER_MM;
+
+  return { meanGray, totalNoise, snr, blurPx, gainMult, baseSignal };
+}
+
+// ── LCG 随机数（种子可控，保证相同参数相同图像）─────────────
+function makeLCG(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+}
+
+// ── 渲染图像到 ImageData ─────────────────────────────────────
+// scene: 当前参数的场景
+// seed: 随机种子（不同seed生成不同噪声模式）
+// W,H: 图像尺寸
+// cropX,cropY,cropW,cropH: 如果非null，只渲染crop区域
+function renderImage(scene, seedVal, W, H) {
+  const { meanGray, totalNoise, blurPx } = scene;
+  const rng = makeLCG(seedVal);
+  const data = new Uint8ClampedArray(W * H * 4);
+
+  // 边缘位置（工件右边缘）
+  const edgeX  = Math.round(W * 0.5);
+  const edgeHW = Math.max(1, blurPx);  // 模糊半宽
+
+  for (let py = 0; py < H; py++) {
+    for (let px = 0; px < W; px++) {
+      // 基础亮度：左侧是工件（暗），右侧是背景（亮）
+      let base;
+      const dx = px - edgeX;
+      if (dx < -edgeHW) {
+        base = meanGray * 0.30;   // 工件区（深灰）
+      } else if (dx < edgeHW) {
+        const t = (dx + edgeHW) / (2 * edgeHW);
+        base = meanGray * (0.30 + 0.70 * t);  // 过渡区（运动模糊）
+      } else {
+        base = meanGray;           // 背景区（目标亮度）
+      }
+
+      // 噪声：高斯近似（Box-Muller需要两个随机数）
+      const u1 = Math.max(1e-10, rng());
+      const u2 = rng();
+      const gauss = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      const noiseVal = gauss * totalNoise;
+
+      const v = Math.round(Math.min(255, Math.max(0, base + noiseVal)));
+      const idx = (py * W + px) * 4;
+      data[idx] = data[idx+1] = data[idx+2] = v;
+      data[idx+3] = 255;
+    }
+  }
+  return data;
+}
+
+// ── 主图画布 ─────────────────────────────────────────────────
+const cvMain  = document.getElementById('cvMain');
+const ctxMain = cvMain.getContext('2d');
+const MW = cvMain.width, MH = cvMain.height;
+
+function drawMain(scene) {
+  const data    = renderImage(scene, 12345, MW, MH);
+  const imgData = new ImageData(data, MW, MH);
+  ctxMain.putImageData(imgData, 0, 0);
+
+  // 边缘标注线
+  const edgeX = Math.round(MW * 0.5);
+  ctxMain.strokeStyle = '#FF554866';
+  ctxMain.lineWidth   = 1; ctxMain.setLineDash([4,3]);
+  ctxMain.beginPath(); ctxMain.moveTo(edgeX,0); ctxMain.lineTo(edgeX,MH); ctxMain.stroke();
+  ctxMain.setLineDash([]);
+
+  // 模糊宽度标注
+  const { blurPx, meanGray } = scene;
+  if (blurPx > 1.5) {
+    const bw = blurPx;
+    ctxMain.strokeStyle = '#FFD166';
+    ctxMain.lineWidth   = 1.5;
+    ctxMain.beginPath();
+    ctxMain.moveTo(edgeX - bw, 14); ctxMain.lineTo(edgeX + bw, 14); ctxMain.stroke();
+    ctxMain.fillStyle  = '#FFD166';
+    ctxMain.font       = '10px monospace'; ctxMain.textAlign = 'center';
+    ctxMain.fillText(`模糊 ${blurPx.toFixed(1)}px`, edgeX, 11);
+  }
+
+  // 噪声区域标注框（右上角放大区）
+  ctxMain.strokeStyle = '#FF554499'; ctxMain.lineWidth = 1;
+  ctxMain.strokeRect(MW - 62, 4, 58, 46);
+  ctxMain.fillStyle = '#FF5544'; ctxMain.font = '9px monospace'; ctxMain.textAlign = 'center';
+  ctxMain.fillText('放大区↓', MW - 33, 58);
+}
+
+// ── 增益对比区（右上角局部放大）────────────────────────────
+const cv0 = document.getElementById('cvCmp0');
+const cvN = document.getElementById('cvCmpN');
+const CW = cv0.width, CH = cv0.height;
+const ctx0 = cv0.getContext('2d');
+const ctxN = cvN.getContext('2d');
+
+// 放大区对应主图右上角 [MW-62,4,58,46]，等比放大到 CW×CH
+const CROP_X = MW - 62, CROP_Y = 4, CROP_W = 58, CROP_H = 46;
+const SCALE  = CW / CROP_W;  // 放大倍数
+
+function drawCrop(ctx, scene, gainOverride) {
+  // 用指定gain（或当前gain）渲染，然后只截取放大区
+  const s = gainOverride !== undefined
+    ? computeScene(te, lux, gainOverride)
+    : scene;
+
+  // 渲染完整图像数据（只计算右上角区域，优化性能）
+  const rng = makeLCG(99999);  // 固定种子，对比时噪声模式一致
+
+  // 渲染放大区（CROP_W × CROP_H 的原始数据，然后放大）
+  const srcW = CROP_W, srcH = CROP_H;
+  const { meanGray: mg, totalNoise: tn, blurPx: bp } = s;
+
+  const edgeX   = Math.round(MW * 0.5);
+  const srcData = new Uint8ClampedArray(srcW * srcH * 4);
+
+  for (let sy = 0; sy < srcH; sy++) {
+    for (let sx = 0; sx < srcW; sx++) {
+      const px = CROP_X + sx;
+      const dx = px - edgeX;
+      let base;
+      if (dx < -bp)       base = mg * 0.30;
+      else if (dx < bp) { const t = (dx+bp)/(2*bp); base = mg*(0.30+0.70*t); }
+      else                base = mg;
+
+      const u1 = Math.max(1e-10, rng());
+      const u2 = rng();
+      const gauss = Math.sqrt(-2*Math.log(u1))*Math.cos(2*Math.PI*u2);
+      const v = Math.round(Math.min(255, Math.max(0, base + gauss * tn)));
+      const idx = (sy * srcW + sx) * 4;
+      srcData[idx] = srcData[idx+1] = srcData[idx+2] = v;
+      srcData[idx+3] = 255;
+    }
+  }
+
+  // 最近邻放大
+  const dstData = new Uint8ClampedArray(CW * CH * 4);
+  for (let dy = 0; dy < CH; dy++) {
+    for (let dx2 = 0; dx2 < CW; dx2++) {
+      const sx = Math.min(srcW-1, Math.floor(dx2 / SCALE));
+      const sy = Math.min(srcH-1, Math.floor(dy  / SCALE));
+      const si = (sy * srcW + sx) * 4;
+      const di = (dy * CW + dx2) * 4;
+      dstData[di] = srcData[si]; dstData[di+1] = srcData[si+1];
+      dstData[di+2] = srcData[si+2]; dstData[di+3] = 255;
+    }
+  }
+
+  ctx.putImageData(new ImageData(dstData, CW, CH), 0, 0);
+
+  // 噪声数值标注
+  ctx.fillStyle = tn > 15 ? '#FF5544' : tn > 6 ? '#FFD166' : '#3DD68C';
+  ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(`σ=${tn.toFixed(1)}`, CW/2, CH-3);
+}
+
+function drawComparisons(scene) {
+  drawCrop(ctx0, scene, 0);       // 固定 gain=0 对照
+  drawCrop(ctxN, scene, gain);    // 当前 gain
+
+  const lbl = document.getElementById('cmpLabel');
+  lbl.textContent = `当前 Gain = ${gain} dB`;
+  lbl.style.color = gain > 12 ? '#FF5544' : gain > 0 ? '#FFD166' : '#3DD68C';
+}
+
+// ── 面板更新 ─────────────────────────────────────────────────
+function setWarn(id, text, level) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  const c = {ok:'#3DD68C', warn:'#FFD166', error:'#FF5544'}[level] || '#667799';
+  el.style.color = c; el.style.borderColor = c; el.style.background = c + '15';
+}
+
+function update() {
+  const s = computeScene(te, lux, gain);
+
+  drawMain(s);
+  drawComparisons(s);
+
+  document.getElementById('mGray').textContent  = s.meanGray;
+  document.getElementById('mNoise').textContent = s.totalNoise.toFixed(1);
+  document.getElementById('mSNR').textContent   = s.snr.toFixed(1);
+  document.getElementById('mBlur').textContent  = s.blurPx.toFixed(1) + ' px';
+
+  // ── 灰度评估 ──
+  if (s.meanGray < 60)
+    setWarn('w1', `⚠ 图像过暗（灰度 ${s.meanGray}）→ 先提光源亮度`, 'error');
+  else if (s.meanGray > 230)
+    setWarn('w1', `⚠ 图像过曝（灰度 ${s.meanGray}）→ 降低亮度或缩短曝光`, 'warn');
+  else
+    setWarn('w1', `✓ 灰度 ${s.meanGray}，处于目标范围`, 'ok');
+
+  // ── 增益评估 ──
+  const gm = s.gainMult;
+  if (gain >= 18)
+    setWarn('w2', `⚠ 增益 ${gain}dB（×${gm.toFixed(1)}）：读出噪声放大 ${gm.toFixed(1)} 倍，看对比区噪声颗粒`, 'error');
+  else if (gain >= 6)
+    setWarn('w2', `⚠ 增益 ${gain}dB（×${gm.toFixed(1)}）：噪声明显增大，优先提升光源亮度`, 'warn');
+  else
+    setWarn('w2', `✓ 增益 ${gain}dB，噪声最低`, 'ok');
+
+  // ── 运动模糊评估 ──
+  if (s.blurPx > 4)
+    setWarn('w3', `⚠ 运动模糊 ${s.blurPx.toFixed(1)}px → 提高亮度后缩短 te`, 'error');
+  else if (s.blurPx > 1.5)
+    setWarn('w3', `ℹ 运动模糊 ${s.blurPx.toFixed(1)}px，亚像素级`, 'warn');
+  else
+    setWarn('w3', `✓ 运动模糊 ${s.blurPx.toFixed(1)}px，可忽略`, 'ok');
+
+  // ── 综合建议 ──
+  const adv = document.getElementById('advice');
+  let msg;
+  if (s.meanGray < 60 && gain === 0)
+    msg = '图像过暗 → 先拉高光源亮度，不要加增益';
+  else if (s.meanGray < 60 && gain > 0)
+    msg = '加了增益仍然暗 → 光源功率不足，需换更亮的光源';
+  else if (s.meanGray > 230)
+    msg = '过曝 → 降低光源亮度，或缩短曝光时间';
+  else if (s.blurPx > 4 && lux < 85)
+    msg = '运动模糊大 → 先提亮光源，再等比缩短 te，保持灰度不变';
+  else if (s.blurPx > 4 && lux >= 85)
+    msg = '光源已满功率，模糊仍大 → 使用频闪过载驱动（Overdrive）';
+  else if (gain >= 6 && lux < 90)
+    msg = `增益 ${gain}dB 已导致噪声放大 ${gm.toFixed(1)} 倍 → 提升光源亮度，将增益降回 0`;
+  else
+    msg = '当前配置合理 ✓ — 亮度适中、噪声低、模糊小';
+  adv.textContent = '调试建议：' + msg;
+}
+
+// ── 控件 ─────────────────────────────────────────────────────
+document.getElementById('sl_te').addEventListener('input', e => {
+  te = parseInt(e.target.value);
+  document.getElementById('val_te').textContent = te + ' μs';
+  update();
+});
+document.getElementById('sl_lux').addEventListener('input', e => {
+  lux = parseInt(e.target.value);
+  document.getElementById('val_lux').textContent = lux + '%';
+  update();
+});
+document.getElementById('sl_gain').addEventListener('input', e => {
+  gain = parseInt(e.target.value);
+  document.getElementById('val_gain').textContent = gain + ' dB';
+  update();
+});
+
+update();
+</script>
+</body>
+</html>

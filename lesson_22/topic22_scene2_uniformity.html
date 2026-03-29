@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>第22题 · 画面2：空间均匀性</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0B0B1A; color:#DDE2F0;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:18px;
+  overflow:hidden; user-select:none;
+}
+h2 { font-size:20px; font-weight:700; }
+.sub { font-size:13px; color:#667799; margin-top:-12px; }
+
+#main { display:flex; gap:20px; width:940px; align-items:flex-start; }
+
+.panel-label { font-size:12px; color:#8899BB; margin-bottom:6px; }
+canvas { border-radius:8px; border:1px solid #252548; display:block; }
+
+/* 右侧信息区 */
+#rightCol { flex:1; display:flex; flex-direction:column; gap:14px; }
+
+/* 均匀性折线图 */
+#linePanel { background:#111124; border-radius:10px; padding:12px; }
+
+/* 数值格子 */
+#gridPanel {
+  background:#111124; border:1px solid #252548;
+  border-radius:10px; padding:14px;
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:10px;
+}
+.cell { display:flex; flex-direction:column; gap:3px; }
+.cell-label { font-size:11px; color:#667799; }
+.cell-val { font-size:18px; font-weight:800; font-variant-numeric:tabular-nums; }
+.warn { color:#FF5544 !important; }
+.ok   { color:#3DD68C !important; }
+
+/* 总评 */
+#verdict {
+  background:#111124; border-radius:8px; padding:12px 16px;
+  font-size:14px; font-weight:700; text-align:center;
+  border:1px solid #252548;
+}
+
+/* 控件 */
+#controls { width:940px; }
+.sl-row { display:flex; align-items:center; gap:12px; }
+.sl-name { font-size:12px; color:#8899BB; width:150px; flex-shrink:0; }
+input[type=range] {
+  flex:1; -webkit-appearance:none; height:4px;
+  border-radius:2px; outline:none; cursor:pointer;
+  background:linear-gradient(to right,#FFD166,#1A1A30);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:15px; height:15px;
+  border-radius:50%; background:#FFD166;
+  border:2px solid #0B0B1A; cursor:pointer;
+}
+.sl-val { width:50px; text-align:right; font-size:12px; font-weight:700; color:#FFD166; }
+</style>
+</head>
+<body>
+
+<h2>空间均匀性：工作距离如何影响FOV内的灰度一致性</h2>
+<p class="sub">边角灰度 / 中心灰度 ≥ 80% 为工业合格线 · 低于此值全局阈值算法将失效</p>
+
+<div id="main">
+  <!-- 左：热力图 -->
+  <div>
+    <div class="panel-label">模拟相机图像（热力图显示亮度分布）</div>
+    <canvas id="heatCanvas" width="300" height="260"></canvas>
+  </div>
+
+  <!-- 右 -->
+  <div id="rightCol">
+    <!-- 均匀性折线 -->
+    <div id="linePanel">
+      <div class="panel-label">中心 → 四角灰度折线</div>
+      <canvas id="lineCanvas" width="480" height="130" style="background:transparent;border:none;padding:0"></canvas>
+    </div>
+
+    <!-- 数值格子 -->
+    <div id="gridPanel">
+      <div class="cell">
+        <span class="cell-label">中心灰度</span>
+        <span class="cell-val ok" id="vCenter">—</span>
+      </div>
+      <div class="cell">
+        <span class="cell-label">边缘灰度（均值）</span>
+        <span class="cell-val" id="vEdge">—</span>
+      </div>
+      <div class="cell">
+        <span class="cell-label">角点灰度（均值）</span>
+        <span class="cell-val" id="vCorner">—</span>
+      </div>
+      <div class="cell">
+        <span class="cell-label">边缘/中心</span>
+        <span class="cell-val" id="vEdgeRatio">—</span>
+      </div>
+      <div class="cell">
+        <span class="cell-label">角点/中心</span>
+        <span class="cell-val" id="vCornerRatio">—</span>
+      </div>
+      <div class="cell">
+        <span class="cell-label">工作距离</span>
+        <span class="cell-val" style="color:#FFD166" id="vWD">—</span>
+      </div>
+    </div>
+
+    <div id="verdict">—</div>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="sl-row">
+    <span class="sl-name">工作距离 WD (mm)</span>
+    <input type="range" id="sl_wd" min="50" max="500" step="5" value="100">
+    <span class="sl-val" id="val_wd">100 mm</span>
+  </div>
+</div>
+
+<script>
+let WD = 100;
+
+// ── 物理模型 ─────────────────────────────────────────────────
+/*
+  均匀性模型：
+  光源为环形光，直径固定（假设200mm）
+  WD越近：光源对被测物各点的角度差越大→中心和边缘接收亮度差异越大→不均匀
+  WD越远：角度差趋于一致→均匀，但平方反比律导致整体亮度下降
+
+  对于图像上位置(x,y)（归一化到-1~1），中心为(0,0)：
+  相对亮度 ∝ 1/(1 + k*(x²+y²)/WD²)
+  k是光源几何系数
+*/
+const LIGHT_DIAM = 180;   // 光源直径 mm
+const IMG_FOV    = 60;    // 相机视野宽度 mm（固定）
+
+function brightnessAt(nx, ny, wd) {
+  // 渐晕模型：falloff = 1/(1 + k*r2)
+  // k = 9000/wd^2，WD越大k越小，渐晕越弱
+  // WD=100: 角点/中心≈36%（明显不合格）
+  // WD=270: 角点/中心≈80%（刚好合格）
+  // WD=400: 角点/中心≈90%（优秀）
+  const r2 = nx * nx + ny * ny;
+  const k = 9000 / (wd * wd);
+  const falloff = 1 / (1 + k * r2);
+  const centerB = Math.min(0.92, Math.max(0.05, 0.92 * Math.pow(100/wd, 0.6)));
+  return Math.min(1.0, Math.max(0.01, falloff * centerB));
+}
+
+// ── 热力图 ───────────────────────────────────────────────────
+const hc   = document.getElementById('heatCanvas');
+const hctx = hc.getContext('2d');
+const HW = hc.width, HH = hc.height;
+
+function grayToColor(v) {
+  // 用热力图：低→蓝，中→绿，高→白
+  const r = Math.min(255, v * 2 * 255);
+  const g = Math.min(255, v * 255);
+  const b = Math.min(255, Math.max(0, (1 - v * 1.5) * 255));
+  return [r, g, b];
+}
+
+function drawHeat() {
+  const imgData = hctx.createImageData(HW, HH);
+  for (let py = 0; py < HH; py++) {
+    for (let px = 0; px < HW; px++) {
+      const nx = (px / HW) * 2 - 1;
+      const ny = (py / HH) * 2 - 1;
+      const v  = brightnessAt(nx, ny, WD);
+      const [r, g, b] = grayToColor(v);
+      const idx = (py * HW + px) * 4;
+      imgData.data[idx]   = r;
+      imgData.data[idx+1] = g;
+      imgData.data[idx+2] = b;
+      imgData.data[idx+3] = 255;
+    }
+  }
+  hctx.putImageData(imgData, 0, 0);
+
+  // 角点标记
+  const corners = [[0,0],[HW,0],[0,HH],[HW,HH]];
+  corners.forEach(([cx, cy]) => {
+    hctx.beginPath();
+    hctx.arc(cx, cy, 6, 0, Math.PI*2);
+    hctx.fillStyle = '#FF554488';
+    hctx.fill();
+    hctx.strokeStyle = '#FF5544';
+    hctx.lineWidth = 1.5;
+    hctx.stroke();
+  });
+
+  // 中心标记
+  hctx.beginPath();
+  hctx.arc(HW/2, HH/2, 6, 0, Math.PI*2);
+  hctx.fillStyle = '#3DD68C88';
+  hctx.fill();
+  hctx.strokeStyle = '#3DD68C';
+  hctx.lineWidth = 1.5;
+  hctx.stroke();
+
+  // 阈值线圆（均匀性80%边界）
+  const vCenter = brightnessAt(0, 0, WD);
+  const threshold80 = vCenter * 0.80;
+  // 找到径向距离使得亮度=threshold80
+  let r80 = 0;
+  for (let r = 0; r <= 1.42; r += 0.01) {
+    if (brightnessAt(r, 0, WD) <= threshold80) { r80 = r; break; }
+  }
+  if (r80 > 0 && r80 < 1.42) {
+    const px80 = r80 * HW / 2;
+    hctx.beginPath();
+    hctx.arc(HW/2, HH/2, px80, 0, Math.PI*2);
+    hctx.strokeStyle = '#FFD16688';
+    hctx.lineWidth = 1.5;
+    hctx.setLineDash([4, 3]);
+    hctx.stroke();
+    hctx.setLineDash([]);
+    hctx.fillStyle = '#FFD166';
+    hctx.font = '10px monospace';
+    hctx.textAlign = 'center';
+    hctx.fillText('80%', HW/2 + px80 * 0.7, HH/2 - 4);
+  }
+
+  // 图例
+  hctx.fillStyle = '#DDE2F0'; hctx.font = '10px monospace'; hctx.textAlign = 'center';
+  hctx.fillText('● 中心', HW/2, HH - 8);
+}
+
+// ── 折线图 ───────────────────────────────────────────────────
+const lc   = document.getElementById('lineCanvas');
+const lctx = lc.getContext('2d');
+const LW = lc.width, LH = lc.height;
+
+function drawLine() {
+  lctx.clearRect(0, 0, LW, LH);
+
+  // 网格
+  lctx.strokeStyle = '#1A1A30'; lctx.lineWidth = 1;
+  for (let y = 0; y <= LH; y += LH/4) {
+    lctx.beginPath(); lctx.moveTo(0, y); lctx.lineTo(LW, y); lctx.stroke();
+  }
+
+  const vCenter = brightnessAt(0, 0, WD);
+  const PAD = 12;
+
+  // 从中心到四个角的四条折线
+  const paths = [
+    {label:'→右上角', color:'#4D9FFF',  dx:1,  dy:-1},
+    {label:'→右下角', color:'#9B72FF',  dx:1,  dy:1},
+    {label:'→左上角', color:'#FFD166',  dx:-1, dy:-1},
+    {label:'→左下角', color:'#3DD68C',  dx:-1, dy:1},
+  ];
+
+  const N = 60;
+  paths.forEach(p => {
+    lctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const t  = i / N;
+      const nx = p.dx * t;
+      const ny = p.dy * t;
+      const v  = brightnessAt(nx, ny, WD) / vCenter;  // 归一化到中心
+      const x  = PAD + (LW - PAD*2) * t;
+      const y  = LH - PAD - (LH - PAD*2) * Math.min(1.05, v);
+      i === 0 ? lctx.moveTo(x, y) : lctx.lineTo(x, y);
+    }
+    lctx.strokeStyle = p.color; lctx.lineWidth = 1.8; lctx.stroke();
+  });
+
+  // 80%线
+  const y80 = LH - PAD - (LH - PAD*2) * 0.80;
+  lctx.strokeStyle = '#FFD16666'; lctx.lineWidth = 1.2; lctx.setLineDash([5,3]);
+  lctx.beginPath(); lctx.moveTo(PAD, y80); lctx.lineTo(LW-PAD, y80); lctx.stroke();
+  lctx.setLineDash([]);
+  lctx.fillStyle = '#FFD166'; lctx.font = '10px monospace'; lctx.textAlign = 'right';
+  lctx.fillText('80% 合格线', LW - PAD, y80 - 3);
+
+  // X轴
+  lctx.fillStyle = '#445566'; lctx.font = '10px monospace'; lctx.textAlign = 'center';
+  lctx.fillText('中心', PAD, LH - 2);
+  lctx.fillText('角点', LW - PAD, LH - 2);
+}
+
+// ── 更新数值 ─────────────────────────────────────────────────
+function updatePanel() {
+  const vC  = brightnessAt(0, 0, WD);
+  const vE  = (brightnessAt(1, 0, WD) + brightnessAt(0, 1, WD)) / 2;
+  const vCo = (brightnessAt(1, 1, WD) + brightnessAt(-1, 1, WD) +
+               brightnessAt(1, -1, WD) + brightnessAt(-1, -1, WD)) / 4;
+
+  const rE  = vE  / vC;
+  const rCo = vCo / vC;
+
+  const toGray = v => Math.round(v * 240);
+  document.getElementById('vCenter').textContent      = toGray(vC);
+  document.getElementById('vEdge').textContent        = toGray(vE);
+  document.getElementById('vCorner').textContent      = toGray(vCo);
+  document.getElementById('vWD').textContent          = WD + ' mm';
+
+  const setRatio = (id, ratio) => {
+    const el = document.getElementById(id);
+    el.textContent = (ratio * 100).toFixed(0) + '%';
+    el.className   = 'cell-val ' + (ratio >= 0.80 ? 'ok' : 'warn');
+  };
+  setRatio('vEdgeRatio', rE);
+  setRatio('vCornerRatio', rCo);
+
+  const v = document.getElementById('verdict');
+  if (rCo >= 0.90) {
+    v.textContent = '✅ 均匀性优秀（角点 ≥ 90%）：全局阈值算法可直接使用';
+    v.style.color = '#3DD68C'; v.style.borderColor = '#3DD68C44';
+  } else if (rCo >= 0.80) {
+    v.textContent = '⚠️ 均匀性合格（角点 80~90%）：全局阈值需留足裕量';
+    v.style.color = '#FFD166'; v.style.borderColor = '#FFD16644';
+  } else {
+    v.textContent = '❌ 均匀性不足（角点 < 80%）：全局阈值失效，需局部自适应';
+    v.style.color = '#FF5544'; v.style.borderColor = '#FF554444';
+  }
+}
+
+function update() {
+  drawHeat();
+  drawLine();
+  updatePanel();
+}
+
+document.getElementById('sl_wd').addEventListener('input', e => {
+  WD = parseInt(e.target.value);
+  document.getElementById('val_wd').textContent = WD + ' mm';
+  update();
+});
+
+update();
+</script>
+</body>
+</html>

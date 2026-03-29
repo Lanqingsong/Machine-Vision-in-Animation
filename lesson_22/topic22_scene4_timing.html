@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>第22题 · 画面4：时序调试</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0B0B1A; color:#DDE2F0;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px;
+  overflow:hidden; user-select:none;
+}
+h2 { font-size:19px; font-weight:700; }
+.sub { font-size:13px; color:#667799; margin-top:-10px; }
+
+#main { display:flex; gap:18px; width:980px; align-items:flex-start; }
+
+#tlCol { flex:1; display:flex; flex-direction:column; gap:8px; }
+.tl-wrap {
+  background:#111124; border:1px solid #252548;
+  border-radius:10px; padding:12px 14px 10px;
+}
+.tl-title { font-size:12px; font-weight:700; margin-bottom:8px; color:#8899BB; }
+.tl-row { display:flex; align-items:center; height:36px; margin-bottom:5px; }
+.tl-label {
+  width:60px; font-size:11px; color:#667799;
+  text-align:right; padding-right:8px; flex-shrink:0; line-height:1.3;
+}
+.tl-cv-wrap { flex:1; height:36px; }
+canvas.tl {
+  width:100%; height:36px; display:block;
+  border-radius:4px; background:#0D0D1E; border:1px solid #1A1A30;
+}
+
+#rightCol { width:210px; flex-shrink:0; display:flex; flex-direction:column; gap:10px; }
+.stat-box {
+  background:#111124; border:1px solid #252548;
+  border-radius:10px; padding:12px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.stat-row { display:flex; flex-direction:column; gap:2px; }
+.stat-label { font-size:11px; color:#667799; }
+.stat-val { font-size:19px; font-weight:800; font-variant-numeric:tabular-nums; }
+.hint-box {
+  background:#111124; border:1px solid #252548;
+  border-radius:8px; padding:10px 12px;
+  font-size:12px; line-height:1.6; color:#8899BB;
+}
+#verdict {
+  padding:10px 12px; border-radius:8px; font-size:13px;
+  font-weight:700; text-align:center; border:1px solid; line-height:1.6;
+}
+
+#controls { width:980px; display:flex; flex-direction:column; gap:8px; }
+.sl-row { display:flex; align-items:center; gap:10px; }
+.sl-name { font-size:12px; color:#8899BB; width:170px; flex-shrink:0; }
+input[type=range] {
+  flex:1; -webkit-appearance:none; height:4px;
+  border-radius:2px; outline:none; cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:14px; height:14px;
+  border-radius:50%; border:2px solid #0B0B1A; cursor:pointer;
+}
+#sl_speed { background:linear-gradient(to right,#4D9FFF,#1A1A30); }
+#sl_speed::-webkit-slider-thumb { background:#4D9FFF; }
+#sl_td    { background:linear-gradient(to right,#9B72FF,#1A1A30); }
+#sl_td::-webkit-slider-thumb    { background:#9B72FF; }
+#sl_tw    { background:linear-gradient(to right,#FFD166,#1A1A30); }
+#sl_tw::-webkit-slider-thumb    { background:#FFD166; }
+#sl_te    { background:linear-gradient(to right,#3DD68C,#1A1A30); }
+#sl_te::-webkit-slider-thumb    { background:#3DD68C; }
+.sl-val { width:70px; text-align:right; font-size:12px; font-weight:700; }
+.sl-hint { font-size:11px; color:#334466; width:120px; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<h2>触发时序调试：让曝光窗口对准工件中心</h2>
+<p class="sub">调节 td，使曝光中点时刻 = 工件运动到视野中心时刻</p>
+
+<div id="main">
+  <div id="tlCol">
+    <div class="tl-wrap">
+      <div class="tl-title">产线时序（实时滚动）</div>
+
+      <!-- 行1：产线俯视图（工件移动） -->
+      <div class="tl-row">
+        <div class="tl-label">产线<br>俯视</div>
+        <div class="tl-cv-wrap"><canvas class="tl" id="cv_line"></canvas></div>
+      </div>
+      <!-- 行2：触发信号 -->
+      <div class="tl-row">
+        <div class="tl-label">触发<br>信号</div>
+        <div class="tl-cv-wrap"><canvas class="tl" id="cv_trig"></canvas></div>
+      </div>
+      <!-- 行3：光源脉冲 -->
+      <div class="tl-row">
+        <div class="tl-label">光源<br>脉冲</div>
+        <div class="tl-cv-wrap"><canvas class="tl" id="cv_pulse"></canvas></div>
+      </div>
+      <!-- 行4：曝光窗口 -->
+      <div class="tl-row">
+        <div class="tl-label">曝光<br>窗口</div>
+        <div class="tl-cv-wrap"><canvas class="tl" id="cv_exp"></canvas></div>
+      </div>
+    </div>
+
+    <!-- 相机图像预览 -->
+    <div class="tl-wrap">
+      <div class="tl-title" id="imgTitle">曝光时采集到的图像</div>
+      <canvas id="cv_img" style="width:100%;height:64px;border-radius:6px;
+        background:#0D0D1E;border:1px solid #1A1A30;display:block;"></canvas>
+    </div>
+  </div>
+
+  <div id="rightCol">
+    <div class="stat-box">
+      <div class="stat-row">
+        <span class="stat-label">工件到中心时刻</span>
+        <span class="stat-val" id="sCenter" style="color:#4D9FFF">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">曝光中点时刻</span>
+        <span class="stat-val" id="sExpMid" style="color:#3DD68C">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">时间偏差</span>
+        <span class="stat-val" id="sDelta">—</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">建议 td</span>
+        <span class="stat-val" id="sRecommend" style="color:#9B72FF">—</span>
+      </div>
+    </div>
+
+    <div class="hint-box" id="hintBox">
+      td 最优值 =<br>
+      传输时间 − te/2<br><br>
+      <span style="color:#4D9FFF">传输时间</span> = 传感器到<br>视野中心距离 ÷ 速度
+    </div>
+
+    <div id="verdict">—</div>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="sl-row">
+    <span class="sl-name" style="color:#4D9FFF">工件速度 (mm/s)</span>
+    <input type="range" id="sl_speed" min="200" max="800" step="50" value="300">
+    <span class="sl-val" style="color:#4D9FFF" id="val_speed">300 mm/s</span>
+    <span class="sl-hint" id="hint_speed"></span>
+  </div>
+  <div class="sl-row">
+    <span class="sl-name" style="color:#9B72FF">触发延迟 td (ms)</span>
+    <input type="range" id="sl_td" min="0" max="60" step="0.5" value="5">
+    <span class="sl-val" style="color:#9B72FF" id="val_td">5.0 ms</span>
+    <span class="sl-hint" id="hint_td" style="color:#9B72FF"></span>
+  </div>
+  <div class="sl-row">
+    <span class="sl-name" style="color:#FFD166">脉冲宽度 tw (ms)</span>
+    <input type="range" id="sl_tw" min="1" max="10" step="0.5" value="4">
+    <span class="sl-val" style="color:#FFD166" id="val_tw">4.0 ms</span>
+    <span class="sl-hint"></span>
+  </div>
+  <div class="sl-row">
+    <span class="sl-name" style="color:#3DD68C">曝光时间 te (ms)</span>
+    <input type="range" id="sl_te" min="0.5" max="5" step="0.1" value="1">
+    <span class="sl-val" style="color:#3DD68C" id="val_te">1.0 ms</span>
+    <span class="sl-hint"></span>
+  </div>
+</div>
+
+<script>
+// ── 场景参数 ─────────────────────────────────────────────────
+// 传感器到视野中心距离：设为较小值，让td_opt在0~60ms内
+// speed=300 → tCenter=10/300*1000=33ms，td_opt≈32ms，在范围内
+// speed=800 → tCenter=10/800*1000=12.5ms，td_opt≈12ms，在范围内
+const SENSOR_DIST_MM = 10;   // 传感器到视野中心距离(mm)
+const FOV_MM         = 40;   // 相机视野宽度(mm)
+const OBJ_W_MM       = 12;   // 工件宽度(mm)
+// 产线图（俯视）的物理长度范围（显示传感器位置和视野范围）
+const LINE_SHOW_MM   = 60;   // 产线图显示的总长度(mm)
+
+const SHOW_MS   = 80;    // 时间轴显示窗口(ms)
+const ANIM_SPEED = 0.06; // 动画时间流速（慢放，数字看得清）
+
+let speed = 300, td = 5, tw = 4, te = 1;
+let elapsed = 0, startTs = null;
+
+// ── Canvas 初始化 ────────────────────────────────────────────
+const cvIds = ['cv_line','cv_trig','cv_pulse','cv_exp'];
+const cvs = {};
+window.addEventListener('load', () => {
+  cvIds.forEach(id => {
+    const cv = document.getElementById(id);
+    cv.width  = cv.parentElement.offsetWidth || 600;
+    cv.height = 36;
+    cvs[id] = cv;
+  });
+  // 图像预览
+  const ci = document.getElementById('cv_img');
+  ci.width  = ci.parentElement.offsetWidth || 600;
+  ci.height = 64;
+  requestAnimationFrame(animate);
+});
+
+// 时间 → x像素（时间轴）
+function toPx(t_ms, W) {
+  return ((t_ms - (elapsed - SHOW_MS)) / SHOW_MS) * W;
+}
+
+function clearCv(id) {
+  const cv = cvs[id], ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle = '#0D0D1E'; ctx.fillRect(0,0,cv.width,cv.height);
+  return [cv, ctx];
+}
+
+// ── 行1：产线俯视图（工件从左往右移动）────────────────────────
+// 这是空间域，不是时间域
+// X轴 = 产线上的物理位置(mm)，0=传感器，+右
+// 工件当前位置 = speed * (elapsed_real_s) — 随动画时间线性移动
+function drawLine() {
+  const [cv, ctx] = clearCv('cv_line');
+  const W = cv.width, H = cv.height;
+
+  // elapsed是动画时间(ms)，对应真实时间 elapsed/ANIM_SPEED ms
+  // 但为了让工件运动速度视觉合理，直接用 elapsed 做时间轴
+  // 工件位置(mm) = speed * elapsed/1000（动画时间）
+  // 工件从产线左侧进入画面
+
+  // 显示范围：传感器左侧20mm 到 视野中心右侧20mm
+  // 传感器在产线 x=0，视野中心在 x=SENSOR_DIST_MM
+  const SHOW_LEFT  = -20;  // mm
+  const SHOW_RIGHT = SENSOR_DIST_MM + 20;  // mm
+  const mmToX = mm => (mm - SHOW_LEFT) / (SHOW_RIGHT - SHOW_LEFT) * W;
+
+  // 背景分区
+  // 左侧：FOV外（深色），FOV内（稍亮），中心区域（绿色）
+  const fovLeft  = SENSOR_DIST_MM - FOV_MM/2;
+  const fovRight = SENSOR_DIST_MM + FOV_MM/2;
+  const centerLeft  = SENSOR_DIST_MM - OBJ_W_MM/2*0.3;
+  const centerRight = SENSOR_DIST_MM + OBJ_W_MM/2*0.3;
+
+  // FOV区域
+  const xFovL = mmToX(fovLeft), xFovR = mmToX(fovRight);
+  ctx.fillStyle = '#1A1A30';
+  ctx.fillRect(Math.max(0,xFovL), 2, Math.min(W,xFovR)-Math.max(0,xFovL), H-4);
+
+  // 中心区域（绿色淡）
+  const xCL = mmToX(centerLeft), xCR = mmToX(centerRight);
+  ctx.fillStyle = '#3DD68C18';
+  ctx.fillRect(Math.max(0,xCL), 2, Math.min(W,xCR)-Math.max(0,xCL), H-4);
+
+  // 传感器位置（触发点）
+  const xSensor = mmToX(0);
+  ctx.strokeStyle = '#4D9FFF'; ctx.lineWidth = 1.5; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(xSensor,0); ctx.lineTo(xSensor,H); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#4D9FFF'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  ctx.fillText('触发', xSensor, H-2);
+
+  // 视野中心
+  const xCenter = mmToX(SENSOR_DIST_MM);
+  ctx.strokeStyle = '#3DD68C88'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(xCenter,0); ctx.lineTo(xCenter,H); ctx.stroke();
+  ctx.fillStyle = '#3DD68C'; ctx.textAlign = 'center';
+  ctx.fillText('视野中心', xCenter, 10);
+
+  // 工件位置（循环，每个触发周期工件重新从传感器左侧进入）
+  // 触发周期 = SENSOR_DIST_MM * 2 / speed * 1000 (ms)
+  const period = SENSOR_DIST_MM * 2 / speed * 1000;
+  // 工件相对当前周期起点的时间偏移
+  const phaseT = elapsed % period;
+  // 工件位置(mm)：触发时刻(phaseT=0)工件在传感器(x=0)
+  // 触发前：工件在传感器左侧，phaseT对应工件在 -(period-phaseT)*speed/1000
+  // 简化：工件从左侧进入，触发时过传感器，然后继续往右
+  const objPos = (phaseT / 1000) * speed;  // mm，相对传感器
+
+  const xObj = mmToX(objPos - OBJ_W_MM/2);
+  const wObj = mmToX(objPos + OBJ_W_MM/2) - xObj;
+
+  // 工件颜色：在FOV内绿色，中心更亮
+  const inFov = objPos > fovLeft && objPos < fovRight;
+  const atCenter = Math.abs(objPos - SENSOR_DIST_MM) < OBJ_W_MM/2;
+  const objCol = atCenter ? '#3DD68C' : inFov ? '#4D9FFF' : '#445566';
+
+  ctx.fillStyle = objCol + 'CC';
+  ctx.fillRect(Math.max(0, xObj), 6, Math.max(2, Math.min(W, xObj+wObj)-Math.max(0,xObj)), H-12);
+  ctx.strokeStyle = objCol; ctx.lineWidth = 1.5;
+  ctx.strokeRect(Math.max(0, xObj), 6, Math.max(2, Math.min(W, xObj+wObj)-Math.max(0,xObj)), H-12);
+
+  // 标注工件当前位置
+  ctx.fillStyle = objCol; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+  const xObjCenter = Math.max(8, Math.min(W-8, mmToX(objPos)));
+  ctx.fillText('工件', xObjCenter, H-1);
+}
+
+// ── 行2：触发信号 ─────────────────────────────────────────────
+function drawTrig() {
+  const [cv, ctx] = clearCv('cv_trig');
+  const W = cv.width, H = cv.height;
+  const period = SENSOR_DIST_MM * 2 / speed * 1000;
+  const t0 = elapsed - SHOW_MS;
+  const first = Math.floor(t0 / period) * period;
+  for (let t = first - period; t <= elapsed + period; t += period) {
+    const x = toPx(t, W);
+    if (x < -4 || x > W+4) continue;
+    ctx.strokeStyle = '#4D9FFF'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, H*0.8); ctx.lineTo(x, 4); ctx.stroke();
+    ctx.fillStyle = '#4D9FFF';
+    ctx.beginPath(); ctx.moveTo(x,4); ctx.lineTo(x-4,12); ctx.lineTo(x+4,12);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+// ── 行3：光源脉冲 ─────────────────────────────────────────────
+function drawPulse() {
+  const [cv, ctx] = clearCv('cv_pulse');
+  const W = cv.width, H = cv.height;
+  const period = SENSOR_DIST_MM * 2 / speed * 1000;
+  const t0 = elapsed - SHOW_MS;
+  const first = Math.floor(t0 / period) * period - period;
+  for (let t = first; t <= elapsed + period; t += period) {
+    const ps = t + td, pe = ps + tw;
+    const x0 = toPx(ps, W), x1 = toPx(pe, W);
+    if (x1 < 0 || x0 > W) continue;
+    const cx0 = Math.max(0,x0), cx1 = Math.min(W,x1);
+    ctx.fillStyle = 'rgba(255,209,102,0.82)';
+    ctx.fillRect(cx0, 4, cx1-cx0, H-8);
+    ctx.strokeStyle = '#FFD166'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(cx0, 4, cx1-cx0, H-8);
+  }
+}
+
+// ── 行4：曝光窗口 + 对准指示 ─────────────────────────────────
+function drawExp() {
+  const [cv, ctx] = clearCv('cv_exp');
+  const W = cv.width, H = cv.height;
+  const period = SENSOR_DIST_MM * 2 / speed * 1000;
+  const tCenter = SENSOR_DIST_MM / speed * 1000;  // 工件到达视野中心的时刻（相对触发）
+  const t0 = elapsed - SHOW_MS;
+  const first = Math.floor(t0 / period) * period - period;
+
+  for (let trig = first; trig <= elapsed + period; trig += period) {
+    const es = trig + td, ee = es + te;
+    const expMid = es + te / 2;
+    const workPieceCenter = trig + tCenter;  // 工件到达中心的绝对时刻
+
+    // 判断对准程度
+    const deltaT = Math.abs(expMid - workPieceCenter);
+    const aligned = deltaT < 0.5;
+    const close   = deltaT < 2;
+    const good    = te <= tw;
+
+    let col;
+    if (!good)    col = '#FF5544';
+    else if (aligned) col = '#3DD68C';
+    else if (close)   col = '#FFD166';
+    else              col = '#FF5544';
+
+    const x0 = toPx(es, W), x1 = toPx(ee, W);
+    if (x1 < 0 || x0 > W) continue;
+    const cx0 = Math.max(0,x0), cx1 = Math.min(W,x1);
+
+    ctx.fillStyle = col + '55';
+    ctx.fillRect(cx0, 3, cx1-cx0, H-6);
+    ctx.strokeStyle = col; ctx.lineWidth = 1.8;
+    ctx.strokeRect(cx0, 3, cx1-cx0, H-6);
+
+    // 曝光中点竖线
+    const xMid = toPx(expMid, W);
+    if (xMid > 0 && xMid < W) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.setLineDash([3,2]);
+      ctx.beginPath(); ctx.moveTo(xMid,0); ctx.lineTo(xMid,H); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 工件到中心的竖线（目标时刻）
+    const xWork = toPx(workPieceCenter, W);
+    if (xWork > 0 && xWork < W) {
+      ctx.strokeStyle = '#3DD68C55'; ctx.lineWidth = 1; ctx.setLineDash([2,3]);
+      ctx.beginPath(); ctx.moveTo(xWork,0); ctx.lineTo(xWork,H); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // 标注
+  ctx.fillStyle = '#3DD68C55'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+  ctx.fillText('↕目标时刻', W-2, H-2);
+}
+
+// ── 相机图像预览 ─────────────────────────────────────────────
+function drawImg() {
+  const cv = document.getElementById('cv_img');
+  if (!cv.width) return;
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+
+  ctx.fillStyle = '#0D0D1E'; ctx.fillRect(0,0,W,H);
+
+  // 计算曝光时工件在图像中的位置
+  const period  = SENSOR_DIST_MM * 2 / speed * 1000;
+  const tCenter = SENSOR_DIST_MM / speed * 1000;
+  // 最近完成的触发
+  const lastTrig = Math.floor((elapsed - te) / period) * period;
+  const expMid   = lastTrig + td + te / 2;
+  const workCenter_t = lastTrig + tCenter;
+  // 曝光中点时，工件位置偏差（mm）
+  const deltaMM = (expMid - workCenter_t) / 1000 * speed;
+  // 图像内偏移（像素）
+  const scale = W / FOV_MM;  // px per mm（用实际图像宽度）
+  const pixOff = Math.round(deltaMM * scale);
+
+  // 图像背景（灰色）
+  const bgV = 185;
+  ctx.fillStyle = `rgb(${bgV},${bgV},${bgV})`;
+  ctx.fillRect(0, 8, W, H-16);
+
+  // 工件（深色矩形）
+  const objWPx = OBJ_W_MM * scale;
+  const objX   = W/2 + pixOff - objWPx/2;
+  ctx.fillStyle = 'rgb(55,55,55)';
+  ctx.fillRect(Math.max(0, objX), 8, Math.min(W, objX+objWPx)-Math.max(0,objX), H-16);
+
+  // 工件两侧边缘线
+  ctx.strokeStyle = 'rgb(120,120,120)'; ctx.lineWidth = 1;
+  if (objX > 0) { ctx.beginPath(); ctx.moveTo(objX,8); ctx.lineTo(objX,H-8); ctx.stroke(); }
+  if (objX+objWPx < W) { ctx.beginPath(); ctx.moveTo(objX+objWPx,8); ctx.lineTo(objX+objWPx,H-8); ctx.stroke(); }
+
+  // 视野中心线（绿色）
+  ctx.strokeStyle = '#3DD68C'; ctx.lineWidth = 1.8; ctx.setLineDash([5,3]);
+  ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 工件中心线（黄色）
+  const wcX = W/2 + pixOff;
+  ctx.strokeStyle = '#FFD166'; ctx.lineWidth = 1.8;
+  ctx.beginPath(); ctx.moveTo(wcX,0); ctx.lineTo(wcX,H); ctx.stroke();
+
+  // 偏移量标注
+  const absOff = Math.abs(pixOff);
+  const col = absOff < 8 ? '#3DD68C' : absOff < 25 ? '#FFD166' : '#FF5544';
+  ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+  if (Math.abs(pixOff) > 4) {
+    ctx.fillStyle = col;
+    const mid = (W/2 + wcX) / 2;
+    ctx.fillText((pixOff>0?'+':'')+pixOff+'px', Math.max(20,Math.min(W-40,mid)), H/2+5);
+    // 偏移箭头
+    ctx.beginPath(); ctx.moveTo(W/2, H/2); ctx.lineTo(wcX, H/2); ctx.strokeStyle=col; ctx.lineWidth=1; ctx.stroke();
+  } else {
+    ctx.fillStyle = '#3DD68C';
+    ctx.fillText('对准 ✓', W/2, H/2+5);
+  }
+
+  // 标注
+  ctx.font = '10px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#3DD68C88'; ctx.fillText('视野中心', W/2, H-2);
+  ctx.fillStyle = '#FFD16688'; ctx.fillText('工件中心', Math.max(30,Math.min(W-30,wcX)), 11);
+
+  // 标题更新
+  const title = absOff < 8
+    ? '曝光时采集到的图像（工件在中心 ✓）'
+    : `曝光时采集到的图像（工件偏移 ${pixOff>0?'+':''}${pixOff}px）`;
+  const tc = absOff < 8 ? '#3DD68C' : absOff < 25 ? '#FFD166' : '#FF5544';
+  const el = document.getElementById('imgTitle');
+  el.textContent = title;
+  el.style.color  = tc;
+}
+
+// ── 右侧面板 ─────────────────────────────────────────────────
+function updatePanel() {
+  const tCenter   = SENSOR_DIST_MM / speed * 1000;
+  const expMid    = td + te / 2;
+  const deltaT    = expMid - tCenter;
+  const tdOpt     = Math.max(0, tCenter - te / 2);
+
+  document.getElementById('sCenter').textContent  = tCenter.toFixed(1) + ' ms';
+  document.getElementById('sExpMid').textContent  = expMid.toFixed(1) + ' ms';
+  document.getElementById('sRecommend').textContent = tdOpt.toFixed(1) + ' ms';
+
+  const absDelta = Math.abs(deltaT);
+  const col = absDelta < 0.5 ? '#3DD68C' : absDelta < 2 ? '#FFD166' : '#FF5544';
+  const deltaEl = document.getElementById('sDelta');
+  deltaEl.textContent = (deltaT>0?'+':'') + deltaT.toFixed(1) + ' ms';
+  deltaEl.style.color = col;
+
+  // td 滑块上显示建议值
+  document.getElementById('hint_td').textContent = `建议: ${tdOpt.toFixed(1)}ms`;
+
+  // 传输时间显示
+  document.getElementById('hint_speed').textContent =
+    `传输时间: ${tCenter.toFixed(1)}ms`;
+
+  // 结论
+  const v = document.getElementById('verdict');
+  if (te > tw) {
+    v.textContent = '⚠ te > tw\n曝光超出脉冲，需增大 tw';
+    v.style.color = '#FF5544'; v.style.borderColor = '#FF554444';
+    v.style.background = '#FF554411';
+  } else if (absDelta < 0.5) {
+    v.textContent = '✅ 对准\n曝光中点 = 工件中心时刻';
+    v.style.color = '#3DD68C'; v.style.borderColor = '#3DD68C44';
+    v.style.background = '#3DD68C0A';
+  } else if (absDelta < 2) {
+    v.textContent = `⚠ 轻微偏移 ${deltaT>0?'偏后':'偏前'}\ntd 建议调至 ${tdOpt.toFixed(1)} ms`;
+    v.style.color = '#FFD166'; v.style.borderColor = '#FFD16644';
+    v.style.background = '#FFD16611';
+  } else {
+    v.textContent = `❌ 偏移过大 (${(deltaT>0?'+':'') + deltaT.toFixed(1)}ms)\ntd 应调至 ${tdOpt.toFixed(1)} ms`;
+    v.style.color = '#FF5544'; v.style.borderColor = '#FF554444';
+    v.style.background = '#FF554411';
+  }
+}
+
+// ── 主循环 ───────────────────────────────────────────────────
+function animate(ts) {
+  if (!startTs) startTs = ts;
+  elapsed = (ts - startTs) * ANIM_SPEED;
+  drawLine();
+  drawTrig();
+  drawPulse();
+  drawExp();
+  drawImg();
+  updatePanel();
+  requestAnimationFrame(animate);
+}
+
+// ── 控件 ─────────────────────────────────────────────────────
+document.getElementById('sl_speed').addEventListener('input', e => {
+  speed = parseInt(e.target.value);
+  document.getElementById('val_speed').textContent = speed + ' mm/s';
+});
+document.getElementById('sl_td').addEventListener('input', e => {
+  td = parseFloat(e.target.value);
+  document.getElementById('val_td').textContent = td.toFixed(1) + ' ms';
+});
+document.getElementById('sl_tw').addEventListener('input', e => {
+  tw = parseFloat(e.target.value);
+  document.getElementById('val_tw').textContent = tw.toFixed(1) + ' ms';
+});
+document.getElementById('sl_te').addEventListener('input', e => {
+  te = parseFloat(e.target.value);
+  document.getElementById('val_te').textContent = te.toFixed(1) + ' ms';
+});
+</script>
+</body>
+</html>

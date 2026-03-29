@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>第22题 · 画面1：对比度评估</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#0B0B1A; color:#DDE2F0;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  height:100vh; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:18px;
+  overflow:hidden; user-select:none;
+}
+h2 { font-size:20px; font-weight:700; }
+.sub { font-size:13px; color:#667799; margin-top:-12px; }
+
+#main { display:flex; gap:20px; width:940px; }
+
+/* 左：模拟图像 */
+#imgPanel {
+  display:flex; flex-direction:column; gap:8px; flex-shrink:0;
+}
+.panel-label { font-size:12px; color:#8899BB; }
+#imgCanvas { border-radius:8px; border:1px solid #252548; display:block; }
+
+/* 中：剖面线 */
+#profilePanel { display:flex; flex-direction:column; gap:8px; flex:1; }
+#profileCanvas { border-radius:8px; border:1px solid #252548; display:block; background:#111124; }
+
+/* 右：数值面板 */
+#numPanel {
+  width:170px; flex-shrink:0;
+  background:#111124; border:1px solid #252548;
+  border-radius:10px; padding:16px 14px;
+  display:flex; flex-direction:column; gap:10px;
+}
+.num-row { display:flex; flex-direction:column; gap:3px; }
+.num-label { font-size:11px; color:#667799; }
+.num-val {
+  font-size:22px; font-weight:800;
+  font-variant-numeric:tabular-nums;
+}
+.grade {
+  font-size:13px; font-weight:700;
+  padding:4px 10px; border-radius:5px;
+  text-align:center; margin-top:4px;
+}
+
+/* 控件区 */
+#controls { width:940px; display:flex; flex-direction:column; gap:10px; }
+.sl-row { display:flex; align-items:center; gap:12px; }
+.sl-name { font-size:12px; color:#8899BB; width:130px; flex-shrink:0; }
+input[type=range] {
+  flex:1; -webkit-appearance:none; height:4px;
+  border-radius:2px; outline:none; cursor:pointer;
+  background:linear-gradient(to right,#4D9FFF,#1A1A30);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:15px; height:15px;
+  border-radius:50%; background:#4D9FFF;
+  border:2px solid #0B0B1A; cursor:pointer;
+}
+.sl-val { width:38px; text-align:right; font-size:12px;
+  font-weight:700; color:#4D9FFF; }
+
+/* 被测物按钮 */
+#typeRow { display:flex; gap:10px; align-items:center; }
+.type-label { font-size:12px; color:#8899BB; width:130px; flex-shrink:0; }
+.tbtn {
+  padding:5px 14px; border-radius:5px; border:1px solid #252548;
+  background:#111124; color:#667799; font-size:12px; cursor:pointer;
+  font-family:inherit; transition:all .15s;
+}
+.tbtn.active { border-color:#4D9FFF; color:#4D9FFF; background:#0D1E3A; }
+</style>
+</head>
+<body>
+
+<h2>对比度评估：照明角度如何影响检测效果</h2>
+<p class="sub">拖动照明角度滑块，观察剖面线的波峰波谷落差——落差越大，对比度越高</p>
+
+<div id="main">
+  <!-- 左：模拟图像 -->
+  <div id="imgPanel">
+    <div class="panel-label">模拟相机图像</div>
+    <canvas id="imgCanvas" width="260" height="220"></canvas>
+    <div class="panel-label" id="modeTag" style="color:#4D9FFF">明场</div>
+  </div>
+
+  <!-- 中：灰度剖面线 -->
+  <div id="profilePanel">
+    <div class="panel-label">灰度剖面线（沿图像水平中线）</div>
+    <canvas id="profileCanvas" width="440" height="220"></canvas>
+  </div>
+
+  <!-- 右：数值面板 -->
+  <div id="numPanel">
+    <div class="num-row">
+      <span class="num-label">背景灰度</span>
+      <span class="num-val" id="vBg" style="color:#4D9FFF">—</span>
+    </div>
+    <div class="num-row">
+      <span class="num-label">目标灰度</span>
+      <span class="num-val" id="vTgt" style="color:#FFD166">—</span>
+    </div>
+    <div class="num-row">
+      <span class="num-label">对比度</span>
+      <span class="num-val" id="vCtrl" style="color:#3DD68C">—</span>
+    </div>
+    <div class="num-row">
+      <span class="num-label">Weber对比度</span>
+      <span class="num-val" id="vWeber" style="color:#9B72FF" style="font-size:16px">—</span>
+    </div>
+    <div class="grade" id="grade">—</div>
+  </div>
+</div>
+
+<div id="controls">
+  <div class="sl-row">
+    <span class="sl-name">照明角度（相对法线）</span>
+    <input type="range" id="sl_angle" min="0" max="85" step="1" value="10">
+    <span class="sl-val" id="val_angle">10°</span>
+  </div>
+  <div id="typeRow">
+    <span class="type-label">被测物类型</span>
+    <button class="tbtn active" data-type="scratch">金属划痕</button>
+    <button class="tbtn" data-type="pcb">PCB字符</button>
+    <button class="tbtn" data-type="glass">透明玻璃件</button>
+  </div>
+</div>
+
+<script>
+// ── 参数 ─────────────────────────────────────────────────────
+const NA = 0.10;  // 镜头NA，决定明场/暗场边界
+function naAngle() { return Math.degrees ? Math.degrees(Math.asin(NA)) : Math.asin(NA)*180/Math.PI; }
+const NA_DEG = naAngle();  // ≈5.7°
+
+let angle = 10;
+let objType = 'scratch';
+
+// ── 物理模型 ─────────────────────────────────────────────────
+/*
+  不同被测物在不同照明角度下的表现：
+
+  金属划痕：
+    明场(angle<NA_DEG)：背景亮(镜面反射)，划痕略暗(散射损失)，对比度低
+    暗场(angle>NA_DEG)：背景黑，划痕散射成亮线，对比度随角度增大
+
+  PCB字符：
+    字符是白色油墨，背景是绿色基材
+    对比度主要取决于颜色互补，与角度关系较小
+    明场中角度偏中等时对比度最高
+
+  透明玻璃件：
+    划痕检测，与金属类似但散射更弱
+    暗场仍更好，但整体对比度低于金属划痕
+*/
+function computeScene(angle, type) {
+  const dark = angle > NA_DEG;
+  let bg, tgt, scratchBright;
+
+  if (type === 'scratch') {
+    if (!dark) {
+      // 明场：背景亮，划痕暗
+      const ratio = angle / Math.max(NA_DEG, 0.1);
+      bg  = 0.92 * (1 - 0.18 * ratio * ratio);
+      tgt = bg - 0.06 * (1 + Math.cos(angle * Math.PI / 180));
+      scratchBright = false;
+    } else {
+      // 暗场：背景黑，划痕亮
+      const excess = angle - NA_DEG;
+      bg  = 0.04 * Math.exp(-excess / 10);
+      const scatter = Math.tanh(Math.sin(angle * Math.PI / 180) * 5) * 0.85;
+      tgt = Math.min(0.95, bg + scatter * 0.35);
+      scratchBright = true;
+    }
+  } else if (type === 'pcb') {
+    // PCB：颜色互补，明场效果好，角度影响较小
+    const optAngle = 30;
+    const angleFactor = Math.exp(-0.5 * Math.pow((angle - optAngle) / 28, 2));
+    bg  = 0.25 + 0.15 * angleFactor;   // 绿色基材对红光反射低→暗
+    tgt = 0.85 - 0.10 * (1 - angleFactor);  // 白色字符反射高→亮
+    scratchBright = true;
+  } else {
+    // 透明玻璃件：暗场检测划痕
+    if (!dark) {
+      const ratio = angle / Math.max(NA_DEG, 0.1);
+      bg  = 0.88 * (1 - 0.15 * ratio * ratio);
+      tgt = bg - 0.03;
+      scratchBright = false;
+    } else {
+      const excess = angle - NA_DEG;
+      bg  = 0.03 * Math.exp(-excess / 12);
+      const scatter = Math.tanh(Math.sin(angle * Math.PI / 180) * 4) * 0.55;
+      tgt = Math.min(0.85, bg + scatter * 0.25);
+      scratchBright = true;
+    }
+  }
+
+  tgt = Math.min(1, Math.max(0, tgt));
+  bg  = Math.min(1, Math.max(0, bg));
+
+  const contrast   = Math.abs(tgt - bg);
+  const weber      = bg > 0.01 ? contrast / bg : contrast / 0.01;
+
+  return { bg, tgt, contrast, weber, scratchBright, dark };
+}
+
+// ── 画图像 ───────────────────────────────────────────────────
+const ic  = document.getElementById('imgCanvas');
+const ictx = ic.getContext('2d');
+const IW = ic.width, IH = ic.height;
+const rng = { v: 42 };
+function rand() { rng.v = (rng.v * 1664525 + 1013904223) & 0xffffffff; return (rng.v >>> 0) / 0xffffffff; }
+
+function drawImage(scene) {
+  const { bg, tgt, scratchBright } = scene;
+  ictx.clearRect(0, 0, IW, IH);
+
+  // 背景
+  rng.v = 42;
+  const bgV = Math.round(bg * 240);
+  for (let y = 0; y < IH; y++) {
+    for (let x = 0; x < IW; x++) {
+      const n = Math.round((rand() - 0.5) * 10);
+      const v = Math.min(255, Math.max(0, bgV + n));
+      ictx.fillStyle = `rgb(${v},${v},${v})`;
+      ictx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  // 目标特征（3条竖向划痕 或 字符块）
+  const tgtV = Math.round(tgt * 240);
+  const featureColor = (x, y) => {
+    const n = Math.round((rand() - 0.5) * 8);
+    const v = Math.min(255, Math.max(0, tgtV + n));
+    return `rgb(${v},${v},${v})`;
+  };
+
+  if (objType === 'pcb') {
+    // PCB：绿色背景 + 白色字符块
+    // 重绘绿色背景
+    rng.v = 42;
+    for (let y = 0; y < IH; y++) {
+      for (let x = 0; x < IW; x++) {
+        const n = Math.round((rand() - 0.5) * 8);
+        const gv = Math.min(200, Math.max(0, Math.round(bg * 180) + n));
+        ictx.fillStyle = `rgb(${Math.round(gv*0.4)},${gv},${Math.round(gv*0.35)})`;
+        ictx.fillRect(x, y, 1, 1);
+      }
+    }
+    // 字符块
+    const chars = [{x:40,w:30,h:18},{x:80,w:18,h:18},{x:108,w:30,h:18},{x:148,w:20,h:18},{x:178,w:30,h:18}];
+    const cy = IH/2 - 9;
+    chars.forEach(c => {
+      const wv = Math.round(tgt * 240);
+      ictx.fillStyle = `rgb(${wv},${wv},${wv})`;
+      ictx.fillRect(c.x, cy, c.w, c.h);
+    });
+  } else {
+    // 划痕：细竖线
+    [0.28, 0.50, 0.72].forEach(xf => {
+      const sx = Math.round(xf * IW);
+      for (let y = 0; y < IH; y++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const px = sx + dx;
+          if (px < 0 || px >= IW) continue;
+          const g  = Math.exp(-0.5 * (dx/1.2) ** 2);
+          const v  = scratchBright
+            ? Math.round((bg + (tgt - bg) * g) * 240)
+            : Math.round((bg - (bg - tgt) * g) * 240);
+          const n  = Math.round((rand() - 0.5) * 6);
+          const cv = Math.min(255, Math.max(0, v + n));
+          ictx.fillStyle = `rgb(${cv},${cv},${cv})`;
+          ictx.fillRect(px, y, 1, 1);
+        }
+      }
+    });
+  }
+
+  // 剖面线标注（水平红线）
+  ictx.strokeStyle = '#FF5544';
+  ictx.lineWidth   = 1.2;
+  ictx.setLineDash([5, 3]);
+  ictx.beginPath();
+  ictx.moveTo(0, IH / 2);
+  ictx.lineTo(IW, IH / 2);
+  ictx.stroke();
+  ictx.setLineDash([]);
+}
+
+// ── 画剖面线 ─────────────────────────────────────────────────
+const pc   = document.getElementById('profileCanvas');
+const pctx = pc.getContext('2d');
+const PW = pc.width, PH = pc.height;
+
+function drawProfile(scene) {
+  const { bg, tgt, scratchBright } = scene;
+  pctx.clearRect(0, 0, PW, PH);
+  pctx.fillStyle = '#111124';
+  pctx.fillRect(0, 0, PW, PH);
+
+  // 网格
+  pctx.strokeStyle = '#1A1A30'; pctx.lineWidth = 1;
+  for (let x = 0; x <= PW; x += PW/6) {
+    pctx.beginPath(); pctx.moveTo(x, 0); pctx.lineTo(x, PH); pctx.stroke();
+  }
+  for (let y = 0; y <= PH; y += PH/4) {
+    pctx.beginPath(); pctx.moveTo(0, y); pctx.lineTo(PW, y); pctx.stroke();
+  }
+
+  // Y轴标注
+  pctx.fillStyle = '#445566'; pctx.font = '10px monospace'; pctx.textAlign = 'right';
+  [0, 64, 128, 192, 255].forEach(v => {
+    const y = PH - 16 - (v / 255) * (PH - 32);
+    pctx.fillText(v, 28, y + 4);
+  });
+  pctx.fillStyle = '#445566'; pctx.font = '11px sans-serif'; pctx.textAlign = 'center';
+  pctx.fillText('灰度值', 14, PH / 2);
+
+  // 计算沿水平中线的剖面
+  const profile = [];
+  const IW2 = 260;
+  for (let px = 0; px < IW2; px++) {
+    const xf = px / IW2;
+    let val = bg;
+    // 三条划痕
+    [0.28, 0.50, 0.72].forEach(xfeat => {
+      const dist = Math.abs(xf - xfeat) * IW2;
+      const g = Math.exp(-0.5 * (dist / 1.8) ** 2);
+      if (scratchBright || objType === 'pcb') {
+        val = Math.max(val, bg + (tgt - bg) * g);
+      } else {
+        val = Math.min(val, bg - (bg - tgt) * g);
+      }
+    });
+    if (objType === 'pcb') {
+      // 字符块剖面
+      val = bg;
+      const chars = [{x:40,w:30},{x:80,w:18},{x:108,w:30},{x:148,w:20},{x:178,w:30}];
+      chars.forEach(c => {
+        if (px >= c.x && px < c.x + c.w) val = tgt;
+      });
+    }
+    profile.push(Math.min(1, Math.max(0, val)));
+  }
+
+  // 画剖面线
+  const PAD_L = 35, PAD_R = 10, PAD_T = 10, PAD_B = 20;
+  const plotW = PW - PAD_L - PAD_R;
+  const plotH = PH - PAD_T - PAD_B;
+
+  function toX(i) { return PAD_L + (i / profile.length) * plotW; }
+  function toY(v) { return PAD_T + plotH - v * plotH; }
+
+  // 背景灰度水平线
+  pctx.strokeStyle = '#4D9FFF44'; pctx.lineWidth = 1; pctx.setLineDash([4, 3]);
+  pctx.beginPath();
+  pctx.moveTo(PAD_L, toY(bg));
+  pctx.lineTo(PW - PAD_R, toY(bg));
+  pctx.stroke();
+  pctx.setLineDash([]);
+  pctx.fillStyle = '#4D9FFF88'; pctx.font = '10px monospace'; pctx.textAlign = 'left';
+  pctx.fillText(`背景 ${Math.round(bg*255)}`, PW - PAD_R - 60, toY(bg) - 3);
+
+  // 目标灰度水平线
+  pctx.strokeStyle = '#FFD16644'; pctx.lineWidth = 1; pctx.setLineDash([4, 3]);
+  pctx.beginPath();
+  pctx.moveTo(PAD_L, toY(tgt));
+  pctx.lineTo(PW - PAD_R, toY(tgt));
+  pctx.stroke();
+  pctx.setLineDash([]);
+  pctx.fillStyle = '#FFD16688'; pctx.font = '10px monospace'; pctx.textAlign = 'left';
+  pctx.fillText(`目标 ${Math.round(tgt*255)}`, PW - PAD_R - 60, toY(tgt) + 12);
+
+  // 剖面曲线
+  pctx.beginPath();
+  profile.forEach((v, i) => {
+    i === 0 ? pctx.moveTo(toX(i), toY(v)) : pctx.lineTo(toX(i), toY(v));
+  });
+  pctx.strokeStyle = '#3DD68C'; pctx.lineWidth = 2; pctx.stroke();
+
+  // 落差标注（第一条划痕处）
+  const peakI = objType === 'pcb' ? 55 : Math.round(0.28 * profile.length);
+  const peakV = profile[peakI];
+  const px0   = toX(peakI);
+  const yBg   = toY(bg);
+  const yTgt  = toY(peakV);
+
+  pctx.strokeStyle = '#FF5544'; pctx.lineWidth = 1.5;
+  pctx.beginPath();
+  pctx.moveTo(px0 + 8, yBg); pctx.lineTo(px0 + 8, yTgt); pctx.stroke();
+  // 箭头
+  [[px0+8, yBg, 1], [px0+8, yTgt, -1]].forEach(([x, y, dir]) => {
+    pctx.beginPath();
+    pctx.moveTo(x, y); pctx.lineTo(x-4, y+dir*8); pctx.lineTo(x+4, y+dir*8);
+    pctx.closePath(); pctx.fillStyle = '#FF5544'; pctx.fill();
+  });
+  pctx.fillStyle = '#FF5544'; pctx.font = 'bold 11px monospace'; pctx.textAlign = 'left';
+  pctx.fillText(`落差 ${Math.round(Math.abs(peakV - bg) * 255)}`, px0 + 12, (yBg + yTgt) / 2 + 4);
+
+  // X轴标注
+  pctx.fillStyle = '#445566'; pctx.font = '10px monospace'; pctx.textAlign = 'center';
+  pctx.fillText('← 图像水平位置 →', PAD_L + plotW / 2, PH - 4);
+}
+
+// ── 更新数值面板 ─────────────────────────────────────────────
+function updatePanel(scene) {
+  const { bg, tgt, contrast, weber, dark } = scene;
+
+  document.getElementById('vBg').textContent    = Math.round(bg  * 255);
+  document.getElementById('vTgt').textContent   = Math.round(tgt * 255);
+  document.getElementById('vCtrl').textContent  = Math.round(contrast * 255);
+  document.getElementById('vWeber').textContent = weber.toFixed(2);
+
+  const gradeEl = document.getElementById('grade');
+  let grade, col, bgCol;
+  if (contrast > 0.35) { grade='优秀'; col='#3DD68C'; bgCol='rgba(61,214,140,.12)'; }
+  else if (contrast > 0.15) { grade='一般'; col='#FFD166'; bgCol='rgba(255,209,102,.12)'; }
+  else { grade='对比度不足'; col='#FF5544'; bgCol='rgba(255,85,68,.12)'; }
+  gradeEl.textContent = grade;
+  gradeEl.style.color = col;
+  gradeEl.style.background = bgCol;
+  gradeEl.style.border = `1px solid ${col}44`;
+
+  const modeEl = document.getElementById('modeTag');
+  modeEl.textContent = dark ? '暗场（照明角 > NA接收锥）' : '明场（照明角 < NA接收锥）';
+  modeEl.style.color = dark ? '#3DD68C' : '#4D9FFF';
+}
+
+// ── 主更新 ───────────────────────────────────────────────────
+function update() {
+  const scene = computeScene(angle, objType);
+  drawImage(scene);
+  drawProfile(scene);
+  updatePanel(scene);
+}
+
+// ── 控件 ─────────────────────────────────────────────────────
+document.getElementById('sl_angle').addEventListener('input', e => {
+  angle = parseInt(e.target.value);
+  document.getElementById('val_angle').textContent = angle + '°';
+  update();
+});
+
+document.querySelectorAll('.tbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tbtn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    objType = btn.dataset.type;
+    update();
+  });
+});
+
+update();
+</script>
+</body>
+</html>

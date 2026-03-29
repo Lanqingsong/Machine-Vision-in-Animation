@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>波长 × 分辨率计算器</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0d0d1e;color:#ccd;font-family:'PingFang SC','Microsoft YaHei',sans-serif;padding:24px;min-height:100vh}
+  h1{text-align:center;font-size:1.25rem;font-weight:500;color:#dde;margin-bottom:4px}
+  .subtitle{text-align:center;font-size:.8rem;color:#667;margin-bottom:20px}
+  .layout{max-width:900px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .panel{background:#141428;border:0.5px solid #252545;border-radius:10px;padding:18px}
+  .full{grid-column:1/-1}
+  h2{font-size:.85rem;font-weight:500;color:#889;margin-bottom:14px;letter-spacing:.05em}
+
+  /* 滑块区 */
+  .slider-row{margin-bottom:16px}
+  .slider-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .sl-name{font-size:.82rem;color:#99aabb}
+  .sl-val{font-size:1rem;font-weight:500;min-width:80px;text-align:right}
+  input[type=range]{width:100%;accent-color:#4466cc;cursor:pointer}
+
+  /* 颜色条 */
+  .spectrum-bar{height:14px;border-radius:7px;background:linear-gradient(to right,
+    #8800ff 0%,#4400ff 10%,#0044ff 20%,#0088ff 30%,
+    #00ccff 40%,#00ff88 50%,#aaff00 60%,
+    #ffee00 70%,#ff8800 80%,#ff2200 90%,#880000 100%);
+    margin-bottom:4px;position:relative}
+  .spectrum-cursor{position:absolute;top:-3px;width:3px;height:20px;
+    background:white;border-radius:2px;transition:left .05s}
+  .spectrum-labels{display:flex;justify-content:space-between;
+    font-size:.65rem;color:#556;margin-bottom:14px}
+
+  /* 数值卡 */
+  .metric-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px}
+  .metric-card{background:#0f0f22;border:0.5px solid #2a2a45;border-radius:8px;padding:12px 10px;text-align:center}
+  .metric-label{font-size:.7rem;color:#667;margin-bottom:4px}
+  .metric-val{font-size:1.3rem;font-weight:500}
+  .metric-unit{font-size:.68rem;color:#778;margin-top:2px}
+
+  /* canvas */
+  canvas{width:100%;border-radius:6px;display:block}
+
+  /* 公式 */
+  .formula{background:#0c0c20;border:0.5px solid #2a2a45;border-radius:8px;
+    padding:12px 16px;font-size:.82rem;text-align:center;color:#aab;margin-bottom:12px}
+  .formula .eq{font-size:1.2rem;color:#cce;letter-spacing:.08em;display:block;margin:6px 0}
+
+  /* 对比表 */
+  .compare-table{width:100%;border-collapse:collapse;font-size:.78rem}
+  .compare-table th{color:#667;font-weight:400;padding:6px 8px;
+    border-bottom:0.5px solid #252540;text-align:center}
+  .compare-table td{padding:6px 8px;border-bottom:0.5px solid #1e1e35;text-align:center}
+  .compare-table tr.current-row td{background:#1e1e3a;font-weight:500}
+  .note{font-size:.72rem;color:#556;margin-top:8px;line-height:1.6}
+</style>
+</head>
+<body>
+<h1>波长 × 光学分辨率 交互计算器</h1>
+<p class="subtitle">δ = λ / (2·NA) &nbsp;·&nbsp; 拖动滑块实时查看各波长的理论分辨率</p>
+
+<div class="layout">
+
+  <!-- 左：控制 -->
+  <div class="panel">
+    <h2>参数设置</h2>
+
+    <div class="slider-row">
+      <div class="slider-label">
+        <span class="sl-name">光源波长 λ</span>
+        <span class="sl-val" id="valWL" style="color:#fff">450 nm</span>
+      </div>
+      <div class="spectrum-bar">
+        <div class="spectrum-cursor" id="specCursor"></div>
+      </div>
+      <div class="spectrum-labels">
+        <span>400</span><span>450</span><span>500</span><span>550</span>
+        <span>600</span><span>650</span><span>700</span>
+      </div>
+      <input type="range" id="slWL" min="400" max="700" value="450" step="1">
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-label">
+        <span class="sl-name">镜头数值孔径 NA</span>
+        <span class="sl-val" id="valNA" style="color:#aabbdd">0.10</span>
+      </div>
+      <input type="range" id="slNA" min="0.05" max="0.40" value="0.10" step="0.01">
+    </div>
+
+    <div class="formula">
+      <span style="color:#778">瑞利判据</span>
+      <span class="eq">δ = λ / (2 · NA)</span>
+      <span id="formulaDetail" style="color:#88aacc"></span>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="metric-label">波长 λ</div>
+        <div class="metric-val" id="mWL" style="color:#aaccff">450</div>
+        <div class="metric-unit">nm</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">NA</div>
+        <div class="metric-val" id="mNA" style="color:#aaddaa">0.10</div>
+        <div class="metric-unit">无量纲</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">最小分辨距离 δ</div>
+        <div class="metric-val" id="mDelta" style="color:#ffcc66">2.25</div>
+        <div class="metric-unit">μm</div>
+      </div>
+    </div>
+
+    <!-- 对比表 -->
+    <table class="compare-table" id="compareTable">
+      <thead>
+        <tr><th>光源</th><th>波长</th><th>δ（当前NA）</th><th>相对蓝光</th></tr>
+      </thead>
+      <tbody id="compareTbody"></tbody>
+    </table>
+    <p class="note">⚠ 互补色原理仅对彩色相机有效。黑白相机选光源需参考传感器光谱响应曲线，而非颜色对比度。</p>
+  </div>
+
+  <!-- 右：可视化 -->
+  <div class="panel">
+    <h2>PSF 宽度可视化</h2>
+    <canvas id="cPSF" height="200"></canvas>
+    <h2 style="margin-top:14px">模拟划痕成像</h2>
+    <canvas id="cScratch" height="180"></canvas>
+    <p class="note" style="margin-top:8px">
+      模拟场景包含 4 条划痕（宽度：4μm / 2μm / 1.5μm / 1μm）<br>
+      蓝色虚线 = 蓝光450nm · 红色虚线 = 红光660nm · 实线 = 当前波长
+    </p>
+  </div>
+
+</div>
+
+<script>
+const slWL = document.getElementById('slWL');
+const slNA = document.getElementById('slNA');
+
+const COMPARE_WLS = [
+  {name:'紫光', wl:405, color:'#9944ff'},
+  {name:'蓝光', wl:450, color:'#3366ff'},
+  {name:'绿光', wl:530, color:'#33cc33'},
+  {name:'黄光', wl:590, color:'#ddcc00'},
+  {name:'红光', wl:660, color:'#ff4422'},
+];
+
+function wlToRgb(wl) {
+  let r=0,g=0,b=0;
+  if(wl<440){r=(440-wl)/40;b=1}
+  else if(wl<490){g=(wl-440)/50;b=1}
+  else if(wl<510){g=1;b=(510-wl)/20}
+  else if(wl<580){r=(wl-510)/70;g=1}
+  else if(wl<645){r=1;g=(645-wl)/65}
+  else{r=1}
+  return `rgb(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)})`;
+}
+
+function delta(wl_nm, na){ return (wl_nm/1000)/(2*na); }
+
+function gaussian(x, sigma){ return Math.exp(-x*x/(2*sigma*sigma)); }
+
+function drawPSF(wl, na){
+  const c = document.getElementById('cPSF');
+  const ctx = c.getContext('2d');
+  const W = c.clientWidth; c.width = W; c.height = 200;
+  ctx.fillStyle = '#0a0a1c'; ctx.fillRect(0,0,W,200);
+
+  const d_cur  = delta(wl, na);
+  const d_blue = delta(450, na);
+  const d_red  = delta(660, na);
+  const xRange = 12;
+  const xToCanvas = x => W/2 + x/xRange*(W/2-20);
+  const maxD = Math.max(d_cur, d_red);
+  const sigma_scale = 60 / maxD;
+
+  function drawCurve(d, color, dash=[]){
+    const sig = d * sigma_scale;
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = dash.length ? 1.5 : 2.5;
+    ctx.setLineDash(dash);
+    for(let px=20;px<W-20;px++){
+      const x = (px - W/2) / (W/2-20) * xRange;
+      const y = 180 - gaussian(x, sig/xRange*xRange)*150;
+      px===20 ? ctx.moveTo(px,y) : ctx.lineTo(px,y);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  drawCurve(d_blue, 'rgba(80,130,255,0.5)', [4,3]);
+  drawCurve(d_red,  'rgba(255,80,60,0.5)',  [4,3]);
+  drawCurve(d_cur,  wlToRgb(wl));
+
+  // 标注
+  ctx.fillStyle='rgba(80,130,255,0.7)';ctx.font='11px sans-serif';
+  ctx.fillText(`蓝光 ${d_blue.toFixed(2)}μm`,10,18);
+  ctx.fillStyle='rgba(255,80,60,0.7)';
+  ctx.fillText(`红光 ${d_red.toFixed(2)}μm`,10,34);
+  ctx.fillStyle=wlToRgb(wl);
+  ctx.fillText(`当前 ${d_cur.toFixed(2)}μm`,10,50);
+
+  ctx.strokeStyle='#334';ctx.lineWidth=0.5;ctx.setLineDash([]);
+  ctx.beginPath();ctx.moveTo(20,185);ctx.lineTo(W-20,185);ctx.stroke();
+  ctx.fillStyle='#445';ctx.font='10px sans-serif';
+  ctx.fillText('位置 (μm)',W/2-20,198);
+}
+
+function gaussianBlur1D(arr, sigma){
+  const out = new Float64Array(arr.length);
+  const r = Math.ceil(sigma*3);
+  for(let i=0;i<arr.length;i++){
+    let sum=0,wsum=0;
+    for(let j=-r;j<=r;j++){
+      const idx=i+j;
+      if(idx<0||idx>=arr.length)continue;
+      const w=Math.exp(-j*j/(2*sigma*sigma));
+      sum+=arr[idx]*w;wsum+=w;
+    }
+    out[i]=sum/wsum;
+  }
+  return out;
+}
+
+function drawScratch(wl, na){
+  const c = document.getElementById('cScratch');
+  const ctx = c.getContext('2d');
+  const W = c.clientWidth; c.width=W; c.height=180;
+  ctx.fillStyle='#0a0a1c'; ctx.fillRect(0,0,W,180);
+
+  const N=800;
+  const xRange=30; // ±15μm
+  const scratches = [{pos:-8,w:4},{pos:-3,w:2},{pos:3,w:1.5},{pos:8,w:1}];
+
+  const ideal = new Float64Array(N).fill(1);
+  for(let i=0;i<N;i++){
+    const x=(i/N-0.5)*xRange;
+    for(const s of scratches)
+      if(Math.abs(x-s.pos)<s.w/2) ideal[i]=0.12;
+  }
+
+  const dx = xRange/N;
+  function blur(wl_nm){ return gaussianBlur1D(ideal, Math.max(delta(wl_nm,na)/dx/2.5,0.3)); }
+
+  const img_blue = blur(450);
+  const img_red  = blur(660);
+  const img_cur  = blur(wl);
+
+  function drawLine(img, color, dash=[]){
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth= dash.length?1.2:2.2;
+    ctx.setLineDash(dash);
+    for(let i=0;i<N;i++){
+      const px = 20 + (i/N)*(W-40);
+      const py = 20 + (1-img[i])*140;
+      i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+    }
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  drawLine(img_blue,'rgba(80,130,255,0.55)',[4,3]);
+  drawLine(img_red, 'rgba(255,80,60,0.55)', [4,3]);
+  drawLine(img_cur, wlToRgb(wl));
+
+  // 划痕标注
+  ctx.font='9px sans-serif'; ctx.fillStyle='#445';
+  for(const s of scratches){
+    const px = 20 + ((s.pos/xRange)+0.5)*(W-40);
+    ctx.fillText(s.w+'μm', px-8, 15);
+    ctx.beginPath();ctx.strokeStyle='#2a2a44';ctx.lineWidth=0.5;ctx.setLineDash([2,2]);
+    ctx.moveTo(px,18);ctx.lineTo(px,165);ctx.stroke();ctx.setLineDash([]);
+  }
+
+  ctx.strokeStyle='#334';ctx.lineWidth=0.5;
+  ctx.beginPath();ctx.moveTo(20,165);ctx.lineTo(W-20,165);ctx.stroke();
+  ctx.fillStyle='#445';ctx.font='10px sans-serif';
+  ctx.fillText('位置 (μm)',W/2-20,178);
+  ctx.fillText('灰度',2,90);
+}
+
+function updateAll(){
+  const wl = +slWL.value;
+  const na = +slNA.value;
+  const d  = delta(wl, na);
+  const color = wlToRgb(wl);
+
+  // 文字更新
+  document.getElementById('valWL').textContent = wl + ' nm';
+  document.getElementById('valWL').style.color = color;
+  document.getElementById('valNA').textContent = na.toFixed(2);
+  document.getElementById('mWL').textContent = wl;
+  document.getElementById('mWL').style.color = color;
+  document.getElementById('mNA').textContent = na.toFixed(2);
+  document.getElementById('mDelta').textContent = d.toFixed(2);
+  document.getElementById('formulaDetail').textContent =
+    `= ${wl} / (2 × ${na.toFixed(2)}) = ${d.toFixed(2)} μm`;
+
+  // 光谱游标
+  const pct = (wl-400)/300*100;
+  document.getElementById('specCursor').style.left = pct+'%';
+
+  // 对比表
+  const d_blue = delta(450, na);
+  const tbody = document.getElementById('compareTbody');
+  tbody.innerHTML = '';
+  COMPARE_WLS.forEach(lw => {
+    const d_lw = delta(lw.wl, na);
+    const ratio = (d_lw/d_blue).toFixed(2);
+    const isCur = Math.abs(lw.wl-wl)<30;
+    const tr = document.createElement('tr');
+    if(isCur) tr.className='current-row';
+    tr.innerHTML = `<td style="color:${lw.color}">${lw.name}</td>
+      <td>${lw.wl} nm</td>
+      <td style="color:${lw.color}">${d_lw.toFixed(2)} μm</td>
+      <td style="color:${d_lw>d_blue?'#ff6655':'#55cc55'}">
+        ${ratio}× ${d_lw>d_blue?'↑':'↓'}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  drawPSF(wl, na);
+  drawScratch(wl, na);
+}
+
+slWL.oninput = updateAll;
+slNA.oninput = updateAll;
+updateAll();
+window.addEventListener('resize', updateAll);
+</script>
+</body>
+</html>

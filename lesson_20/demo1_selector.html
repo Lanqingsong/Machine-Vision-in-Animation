@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>光源颜色选型决策器</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#0f0f1e;color:#dde;font-family:'PingFang SC','Microsoft YaHei',sans-serif;min-height:100vh;padding:24px}
+  h1{text-align:center;font-size:1.3rem;font-weight:500;color:#ccd;margin-bottom:6px}
+  .subtitle{text-align:center;font-size:.82rem;color:#778;margin-bottom:20px}
+  .layout{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:960px;margin:0 auto}
+  /* 左：材质选择 */
+  .panel{background:#161628;border:0.5px solid #2a2a4a;border-radius:10px;padding:16px}
+  .panel h2{font-size:.88rem;font-weight:500;color:#99aabb;margin-bottom:12px;letter-spacing:.05em}
+  .material-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .mat-btn{border:1px solid #2a3a4a;background:#1a1a30;border-radius:8px;padding:12px 10px;cursor:pointer;text-align:center;transition:all .2s}
+  .mat-btn:hover{border-color:#4455aa;background:#1e1e38}
+  .mat-btn.active{border-color:#6677cc;background:#232348;box-shadow:0 0 0 2px rgba(100,120,220,.25)}
+  .mat-icon{font-size:1.4rem;margin-bottom:4px}
+  .mat-name{font-size:.82rem;color:#bbc;font-weight:500}
+  .mat-desc{font-size:.72rem;color:#667;margin-top:2px}
+  /* 右：结果 */
+  .result-area{display:flex;flex-direction:column;gap:10px}
+  .result-header{font-size:.82rem;color:#778;margin-bottom:4px}
+  .light-options{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .light-card{border:1px solid #2a2a40;border-radius:8px;padding:10px 8px;text-align:center;transition:all .3s;opacity:.35}
+  .light-card.recommended{opacity:1;border-width:2px;transform:scale(1.04)}
+  .light-card.ok{opacity:.7}
+  .light-card.bad{opacity:.25}
+  .light-name{font-size:.78rem;font-weight:500;margin-top:6px;margin-bottom:2px}
+  .light-nm{font-size:.68rem;color:#889}
+  .light-swatch{width:28px;height:28px;border-radius:50%;margin:0 auto 4px}
+  .badge{display:inline-block;font-size:.65rem;padding:2px 6px;border-radius:4px;margin-top:4px}
+  .b-best{background:#1a3a1a;color:#88dd88;border:0.5px solid #336633}
+  .b-ok  {background:#2a2a1a;color:#ccaa44;border:0.5px solid #555522}
+  .b-bad {background:#2a1a1a;color:#aa5544;border:0.5px solid #552222}
+  /* 详情卡 */
+  .detail-card{background:#161628;border:0.5px solid #2a2a4a;border-radius:10px;padding:14px;min-height:140px}
+  .detail-title{font-size:.9rem;font-weight:500;margin-bottom:10px}
+  .detail-row{display:flex;gap:12px;margin-bottom:8px}
+  .detail-col{flex:1}
+  .detail-col h4{font-size:.75rem;color:#778;margin-bottom:5px;font-weight:400;letter-spacing:.04em}
+  .detail-col ul{list-style:none;padding:0}
+  .detail-col li{font-size:.78rem;color:#aab;padding:2px 0;padding-left:10px;position:relative}
+  .detail-col li::before{content:'·';position:absolute;left:0;color:#556}
+  .warn-box{background:#1e1a0e;border:0.5px solid #443a1a;border-radius:6px;padding:8px 10px;font-size:.75rem;color:#ccaa55;margin-top:8px}
+  /* 矩阵表 */
+  .matrix-wrap{grid-column:1/-1;background:#161628;border:0.5px solid #2a2a4a;border-radius:10px;padding:16px;overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:.75rem}
+  th{color:#778;font-weight:400;padding:6px 8px;border-bottom:0.5px solid #2a2a40;text-align:center}
+  th:first-child{text-align:left}
+  td{padding:6px 8px;border-bottom:0.5px solid #1e1e30;text-align:center}
+  td:first-child{text-align:left;color:#aab}
+  .cell-star{color:#ffcc44;font-size:1rem}
+  .cell-ok{color:#778;font-size:.8rem}
+  .cell-bad{color:#443;font-size:.8rem}
+  .cell-na{color:#333;font-size:.7rem}
+  tr.highlight-row td{background:#1e1e38}
+  .placeholder{color:#445;font-size:.82rem;text-align:center;padding:30px}
+</style>
+</head>
+<body>
+<h1>光源颜色选型决策器</h1>
+<p class="subtitle">点击左侧材质类型，右侧自动显示推荐光源与选型依据</p>
+
+<div class="layout">
+  <!-- 左：材质 -->
+  <div class="panel">
+    <h2>被测物材质</h2>
+    <div class="material-grid" id="matGrid"></div>
+  </div>
+
+  <!-- 右：光源推荐 -->
+  <div class="result-area">
+    <div class="panel">
+      <h2>光源推荐</h2>
+      <div class="light-options" id="lightOptions"></div>
+    </div>
+    <div class="detail-card" id="detailCard">
+      <p class="placeholder">← 点击左侧材质开始选型</p>
+    </div>
+  </div>
+
+  <!-- 选型矩阵 -->
+  <div class="matrix-wrap">
+    <h2 style="font-size:.88rem;font-weight:500;color:#99aabb;margin-bottom:12px">速查矩阵</h2>
+    <table id="matrixTable"></table>
+  </div>
+</div>
+
+<script>
+const MATERIALS = [
+  { id:'metal_al',  icon:'🔩', name:'铝/钢 金属',   desc:'划痕·打码检测',
+    scores:{red:2,green:2,blue:5,white:2,ir:0,uv:0},
+    best:'blue',
+    why:'蓝光短波长提升分辨率，对微米级划痕散射更敏感',
+    good:['蓝光同轴+暗场照明','窄带蓝色滤光片压制杂光'],
+    bad:['白光对比度低 15–30%','红光无法分辨微米级浅划痕'],
+    warn:'铜/金/黄铜除外：它们吸收蓝光，应改用红光或绿光'},
+  { id:'metal_cu',  icon:'🪙', name:'铜/金属件',   desc:'氧化·色差检测',
+    scores:{red:4,green:4,blue:1,white:3,ir:0,uv:0},
+    best:'red',
+    why:'铜/金对蓝光选择性吸收，反射率低；红光反射率高且均匀',
+    good:['红光或绿光漫反射照明','白光配彩色相机看色差'],
+    bad:['蓝光：铜吸收蓝光，对比度反而下降'],
+    warn:'此材质是蓝光禁区，反直觉但很重要'},
+  { id:'pcb',       icon:'📗', name:'PCB板',        desc:'字符·焊点检测',
+    scores:{red:5,green:3,blue:2,white:3,ir:0,uv:0},
+    best:'red',
+    why:'绿色PCB吸收红光→绿色背景变暗；白色字符反射红光→字符变亮',
+    good:['红色环形光/同轴光','高角度明场照明'],
+    bad:['绿光：PCB反射绿光，背景过亮，对比度低'],
+    warn:'经典互补色案例，考试高频出现'},
+  { id:'plastic_t', icon:'🧴', name:'透明塑料件',   desc:'气泡·异物检测',
+    scores:{red:1,green:1,blue:1,white:2,ir:5,uv:0},
+    best:'ir',
+    why:'可见光透射率差；近红外（850nm）能穿透塑料，异物因散射差异而可见',
+    good:['近红外透射背光（850nm）','配InGaAs或硅基IR相机'],
+    bad:['可见光：大部分被散射或吸收，内部细节不可见'],
+    warn:'近红外照明是透明塑料件检测的标准方案'},
+  { id:'food',      icon:'🍅', name:'食品/农产品',   desc:'颜色分级·瑕疵',
+    scores:{red:3,green:5,blue:2,white:4,ir:2,uv:0},
+    best:'green',
+    why:'绿光接近人眼最敏感区间，对食品颜色差异响应好；配合彩色相机还原真实颜色',
+    good:['白光彩色相机（颜色分级）','绿光黑白相机（纹理缺陷）'],
+    bad:['蓝光：荧光干扰，食品有机物在蓝光下可能发荧光'],
+    warn:'需要颜色信息时必须用白光+彩色相机'},
+  { id:'print',     icon:'📄', name:'印刷品/纸张',  desc:'字符·条码检测',
+    scores:{red:5,green:3,blue:2,white:3,ir:2,uv:2},
+    best:'red',
+    why:'纸张含荧光增白剂，蓝光会激发荧光干扰；红光无荧光干扰且对比度高',
+    good:['红光环形光','同轴红光（细小字符）'],
+    bad:['蓝光：激发纸张荧光增白剂，产生杂散光干扰'],
+    warn:'纸张和白色塑料件都含荧光增白剂，避免用蓝/紫外光'},
+  { id:'crack',     icon:'🔍', name:'金属裂纹探伤',  desc:'微裂纹检测',
+    scores:{red:1,green:1,blue:2,white:1,ir:0,uv:5},
+    best:'uv',
+    why:'荧光渗透探伤：渗透剂渗入裂纹后，紫外光激发荧光，裂纹在暗场中发亮',
+    good:['UV365nm激发光','配长通滤光片（>420nm）滤除UV背景'],
+    bad:['可见光：荧光渗透剂无法被激发，裂纹不可见'],
+    warn:'需要配合荧光渗透剂使用，是NDT领域标准方案'},
+  { id:'wafer',     icon:'💿', name:'半导体晶圆',    desc:'表面颗粒·划痕',
+    scores:{red:2,green:3,blue:5,white:2,ir:3,uv:4},
+    best:'blue',
+    why:'蓝/紫外短波长在晶圆表面颗粒检测中提供最高分辨率；也可用近红外穿透硅片检测内部',
+    good:['蓝光/深紫外（193nm EUVL）表面检测','近红外穿透检测内部缺陷'],
+    bad:['红光：波长太长，亚微米颗粒不可见'],
+    warn:'晶圆检测是蓝/紫外光最高端的工业应用场景'},
+];
+
+const LIGHTS = [
+  { id:'red',   name:'红光',   nm:'620–750nm', swatch:'#ff4422' },
+  { id:'green', name:'绿光',   nm:'495–570nm', swatch:'#44cc44' },
+  { id:'blue',  name:'蓝光',   nm:'450–495nm', swatch:'#3366ff' },
+  { id:'white', name:'白光',   nm:'全波段',    swatch:'#eeeeff' },
+  { id:'ir',    name:'红外',   nm:'>760nm',    swatch:'#550000' },
+  { id:'uv',    name:'紫外',   nm:'<400nm',    swatch:'#551188' },
+];
+
+let selectedMat = null;
+
+// 渲染材质按钮
+const matGrid = document.getElementById('matGrid');
+MATERIALS.forEach(m => {
+  const btn = document.createElement('div');
+  btn.className = 'mat-btn';
+  btn.innerHTML = `<div class="mat-icon">${m.icon}</div>
+    <div class="mat-name">${m.name}</div>
+    <div class="mat-desc">${m.desc}</div>`;
+  btn.onclick = () => selectMaterial(m.id);
+  btn.id = 'mat_' + m.id;
+  matGrid.appendChild(btn);
+});
+
+// 渲染光源卡片
+const lightOptions = document.getElementById('lightOptions');
+LIGHTS.forEach(l => {
+  const card = document.createElement('div');
+  card.className = 'light-card';
+  card.id = 'light_' + l.id;
+  card.innerHTML = `<div class="light-swatch" style="background:${l.swatch}"></div>
+    <div class="light-name">${l.name}</div>
+    <div class="light-nm">${l.nm}</div>
+    <div id="badge_${l.id}"></div>`;
+  lightOptions.appendChild(card);
+});
+
+function selectMaterial(id) {
+  const mat = MATERIALS.find(m => m.id === id);
+  if (!mat) return;
+  selectedMat = id;
+
+  // 高亮材质按钮
+  document.querySelectorAll('.mat-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mat_' + id).classList.add('active');
+
+  // 更新光源卡片
+  LIGHTS.forEach(l => {
+    const card  = document.getElementById('light_' + l.id);
+    const badge = document.getElementById('badge_' + l.id);
+    const score = mat.scores[l.id];
+    card.className = 'light-card';
+    if (l.id === mat.best) {
+      card.classList.add('recommended');
+      card.style.borderColor = l.swatch;
+      badge.innerHTML = `<span class="badge b-best">★ 推荐</span>`;
+    } else if (score >= 3) {
+      card.classList.add('ok');
+      card.style.borderColor = '#2a2a40';
+      badge.innerHTML = `<span class="badge b-ok">可用</span>`;
+    } else if (score >= 1) {
+      card.classList.add('bad');
+      card.style.borderColor = '#2a2a40';
+      badge.innerHTML = `<span class="badge b-bad">不推荐</span>`;
+    } else {
+      card.style.borderColor = '#2a2a40';
+      badge.innerHTML = `<span class="badge b-bad" style="opacity:.5">不适用</span>`;
+    }
+  });
+
+  // 更新详情
+  const bestLight = LIGHTS.find(l => l.id === mat.best);
+  document.getElementById('detailCard').innerHTML = `
+    <div class="detail-title" style="color:${bestLight.swatch}">
+      ${mat.icon} ${mat.name} · 推荐 ${bestLight.name}（${bestLight.nm}）
+    </div>
+    <p style="font-size:.78rem;color:#99aacc;margin-bottom:10px">${mat.why}</p>
+    <div class="detail-row">
+      <div class="detail-col">
+        <h4>✅ 推荐做法</h4>
+        <ul>${mat.good.map(g => `<li>${g}</li>`).join('')}</ul>
+      </div>
+      <div class="detail-col">
+        <h4>❌ 避免方案</h4>
+        <ul>${mat.bad.map(b => `<li>${b}</li>`).join('')}</ul>
+      </div>
+    </div>
+    <div class="warn-box">⚠ ${mat.warn}</div>`;
+
+  // 更新矩阵高亮行
+  document.querySelectorAll('#matrixTable tr').forEach(tr => {
+    tr.classList.remove('highlight-row');
+    if (tr.dataset.id === id) tr.classList.add('highlight-row');
+  });
+}
+
+// 渲染矩阵表
+const table = document.getElementById('matrixTable');
+const thead = document.createElement('thead');
+thead.innerHTML = `<tr><th>材质 / 光源</th>${LIGHTS.map(l =>
+  `<th style="color:${l.swatch === '#eeeeff' ? '#ccc' : l.swatch}">${l.name}</th>`
+).join('')}</tr>`;
+table.appendChild(thead);
+const tbody = document.createElement('tbody');
+MATERIALS.forEach(m => {
+  const tr = document.createElement('tr');
+  tr.dataset.id = m.id;
+  tr.innerHTML = `<td>${m.icon} ${m.name}</td>${LIGHTS.map(l => {
+    const s = m.scores[l.id];
+    if (s === 5) return `<td class="cell-star">★</td>`;
+    if (s >= 3) return `<td class="cell-ok">○</td>`;
+    if (s >= 1) return `<td class="cell-bad">✗</td>`;
+    return `<td class="cell-na">—</td>`;
+  }).join('')}`;
+  tbody.appendChild(tr);
+});
+table.appendChild(tbody);
+</script>
+</body>
+</html>
